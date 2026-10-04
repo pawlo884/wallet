@@ -28,7 +28,7 @@ class Config:
     tz: ZoneInfo = field(default_factory=lambda: ZoneInfo(os.getenv("TZ", "Europe/Warsaw")))
     require_confirmation: bool = field(default_factory=lambda: _bool("REQUIRE_CONFIRMATION", True))
 
-    schedule_file: str = field(default_factory=lambda: os.getenv("SCHEDULE_FILE", "schedule.yaml"))
+    schedule_file: str = field(default_factory=lambda: os.getenv("SCHEDULE_FILE", "config/schedule.yaml"))
     state_file: str = field(default_factory=lambda: os.getenv("STATE_FILE", "data/state.json"))
     # Od której godziny (czas lokalny) wysyłać przypomnienia o płatnościach.
     reminder_hour: int = field(default_factory=lambda: int(os.getenv("REMINDER_HOUR", "9")))

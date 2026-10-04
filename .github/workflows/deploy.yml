@@ -1,0 +1,77 @@
+name: CI/CD
+
+# Każdy push / PR: build obrazu + testy offline (bez sieci, atrapy Wallet i Claude).
+# Push na main: po zielonych testach deploy na VPS przez SSH (git reset + docker compose).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build obrazu
+        run: docker build -t wallet-bot:ci .
+
+      - name: Walidacja harmonogramu + testy offline
+        run: |
+          docker run --rm \
+            -v "$PWD/tests:/app/tests:ro" \
+            -v "$PWD/config:/app/config:ro" \
+            wallet-bot:ci python -m tests.test_offline
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CONFIGURED: ${{ secrets.VPS_HOST != '' && secrets.VPS_SSH_KEY != '' }}
+    steps:
+      - name: Brak sekretów — pomijam deploy
+        if: env.CONFIGURED != 'true'
+        run: echo "::warning::Ustaw VPS_HOST, VPS_USER, VPS_SSH_KEY w Settings → Secrets → Actions"
+
+      - name: Deploy na VPS
+        if: env.CONFIGURED == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd "${{ vars.DEPLOY_PATH || '/home/pawel/wallet' }}"
+
+            echo "📥 Kod: $(git rev-parse --short HEAD) → ${{ github.sha }}"
+            git fetch --quiet origin main
+            git reset --hard "${{ github.sha }}"
+
+            echo "🐳 Build i start"
+            docker compose up -d --build --remove-orphans
+
+            echo "⏳ Sprawdzam, czy kontener stoi (bez pętli restartów)"
+            started=$(docker inspect -f '{{.State.StartedAt}}' wallet-bot)
+            sleep 25
+            state=$(docker inspect -f '{{.State.Status}}' wallet-bot)
+            docker compose logs --tail 30 wallet-bot
+            if [ "$state" = "running" ] && [ "$(docker inspect -f '{{.State.StartedAt}}' wallet-bot)" = "$started" ]; then
+              echo "✅ Deploy OK"
+            else
+              echo "❌ Kontener nie działa stabilnie (stan: $state)"; exit 1
+            fi
+
+            docker image prune -f >/dev/null

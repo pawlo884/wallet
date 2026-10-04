@@ -74,7 +74,7 @@ async def run() -> None:
         notifiers.append(discord_bot.notifier(dc_client, core))
 
     reminders = None
-    if core.planned.enabled:
+    if notifiers:
         reminders = asyncio.create_task(reminder_loop(core, notifiers))
 
     try:

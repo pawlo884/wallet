@@ -25,13 +25,13 @@ domeny ani HTTPS** na VPS.
 | `/saldo` (`!saldo` na Discordzie) | salda kont |
 | `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
 | `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia + najbliższe 30 dni |
-| `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `schedule.yaml` |
+| `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
 ## Płatności cykliczne
 
 Bot zastępuje „transakcje zaplanowane” z Wallet: API Wallet pozwala je tylko czytać, więc nie da się
-ich potwierdzać zdalnie. Lista płatności jest w pliku `schedule.yaml` (wzór pól: `schedule.example.yaml`).
+ich potwierdzać zdalnie. Lista płatności jest w pliku `config/schedule.yaml` (wzór pól: `config/schedule.example.yaml`).
 
 W dniu terminu, od godziny `REMINDER_HOUR`, bot wysyła przypomnienie:
 
@@ -88,10 +88,32 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Aktualizacja: `git pull && docker compose up -d --build`.
+Aktualizacja: automatycznie po pushu na `main` (sekcja CI/CD), ręcznie: `git pull && docker compose up -d --build`.
 
 W Portainerze: *Stacks → Add stack → Repository* (albo wklej `docker-compose.yml`) i zmienne z `.env`
 wpisz w sekcji *Environment variables*.
+
+## CI/CD (GitHub Actions)
+
+`.github/workflows/deploy.yml`:
+- **każdy push i PR**: build obrazu i testy offline. Sprawdza też poprawność `config/schedule.yaml`.
+- **push na `main`**: po zielonych testach łączy się z VPS przez SSH, robi `git reset --hard` na nowy commit
+  i `docker compose up -d --build`, a potem sprawdza, czy kontener działa bez pętli restartów.
+  Jeśli coś jest nie tak, job jest czerwony, a w logu zobaczysz ostatnie 30 linii z kontenera.
+
+Jednorazowa konfiguracja (te same sekrety co w repo `nc`):
+
+| Sekret (Settings → Secrets and variables → Actions) | Wartość |
+|---|---|
+| `VPS_HOST` | host/IP VPS osiągalny z internetu |
+| `VPS_USER` | `pawel` |
+| `VPS_SSH_KEY` | prywatny klucz SSH z dostępem do VPS |
+
+Opcjonalnie zmienna `DEPLOY_PATH` (zakładka *Variables*), domyślnie `/home/pawel/wallet`.
+Bez sekretów workflow robi tylko testy i pomija deploy.
+
+Zmiana płatności cyklicznych = edycja `config/schedule.yaml` i push. Bot sam wczytuje nowy plik
+(katalog `config/` jest podmontowany, zmiana wykrywana po dacie modyfikacji).
 
 ## Lokalnie (Windows)
 

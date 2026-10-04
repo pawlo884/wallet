@@ -77,7 +77,7 @@ async def planned():
     from pathlib import Path
     from bot.planned import Planned
 
-    sched = "schedule.yaml" if Path("schedule.yaml").exists() else "schedule.example.yaml"
+    sched = "config/schedule.yaml" if Path("config/schedule.yaml").exists() else "config/schedule.example.yaml"
     state = Path(tempfile.mkdtemp()) / "state.json"
     os.environ.update(SCHEDULE_FILE=sched, STATE_FILE=str(state))
     core = Core(Config())

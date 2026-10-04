@@ -153,11 +153,30 @@ class Planned:
     def __init__(self, core: "Core"):
         self.core = core
         self.schedule = Schedule.load(core.cfg.schedule_file)
+        self._mtime = self._file_mtime()
         self.state = State(core.cfg.state_file)
         self._awaiting_amount: dict[str, str] = {}  # właściciel → klucz terminu
 
     def reload(self) -> None:
         self.schedule = Schedule.load(self.core.cfg.schedule_file)
+        self._mtime = self._file_mtime()
+
+    def _file_mtime(self) -> float | None:
+        try:
+            return Path(self.core.cfg.schedule_file).stat().st_mtime
+        except OSError:
+            return None
+
+    def reload_if_changed(self) -> None:
+        """Po deployu (git pull) harmonogram wczytuje się sam — bez restartu i /odswiez."""
+        if self._file_mtime() == self._mtime:
+            return
+        try:
+            self.reload()
+            log.info("Harmonogram przeładowany po zmianie pliku")
+        except Exception:
+            log.exception("Błędny schedule.yaml — zostaje poprzednia wersja")
+            self._mtime = self._file_mtime()  # nie próbuj co chwilę od nowa
 
     @property
     def enabled(self) -> bool:
@@ -165,6 +184,7 @@ class Planned:
 
     def pending(self, today: date) -> list[tuple[Payment, date]]:
         """Terminy do dziś włącznie, jeszcze niepotwierdzone i niepominięte."""
+        self.reload_if_changed()
         lo = max(self.schedule.start, today - timedelta(days=LOOKBACK_DAYS))
         out = [
             (p, d)
@@ -198,6 +218,7 @@ class Planned:
     async def overview(self, today: date) -> list["Reply"]:
         from .core import Reply, fmt_money
 
+        self.reload_if_changed()
         if not self.enabled:
             return [Reply("Brak płatności cyklicznych (plik schedule.yaml).")]
         cur = self.core.cfg.base_currency
