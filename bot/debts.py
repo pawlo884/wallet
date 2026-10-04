@@ -66,7 +66,10 @@ class Debts:
     def prompt_block(self) -> str:
         if not self.items:
             return "(brak)"
-        return "\n".join(f"{d.id} | {d.name}" for d in self.items.values())
+        # Rata pomaga odróżnić podobne nazwy („Opony” 147 zł vs „Opona” 71,10 zł).
+        return "\n".join(
+            f"{d.id} | {d.name}" + (f" | rata {d.installment:.2f}" if d.installment else "") for d in self.items.values()
+        )
 
     async def add(
         self,

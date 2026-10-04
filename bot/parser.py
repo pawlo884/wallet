@@ -131,7 +131,7 @@ Konto domyślne: {default_account}
 - Spłata długu z listy DŁUGI ("spłata A6 500", "oddałem tacie 200", przelew z tytułem zawierającym
   nazwę długu) → debt_id = id tego długu, type = expense. Inne wydatki → debt_id = null.
 
-DŁUGI (id | nazwa):
+DŁUGI (id | nazwa | rata, jeśli jest — przy podobnych nazwach dopasuj też po kwocie):
 {debts}
 
 KATEGORIE (id | nazwa | kategoria nadrzędna):
