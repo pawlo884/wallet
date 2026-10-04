@@ -6,6 +6,7 @@ ręcznie w aplikacji. Ile zostało = kwota początkowa − suma wydatków z etyk
 """
 
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass
@@ -27,33 +28,55 @@ class Debt:
     start: str  # YYYY-MM-DD — spłaty liczone od tej daty
     label_id: str
     category_id: str | None = None
+    installment: float | None = None  # rata — wtedy pokazujemy też „zostało N rat”
+    info: str | None = None  # np. „kapitał 57 266,30 zł wg banku”
 
 
 class Debts:
     def __init__(self, core: "Core"):
         self.core = core
         self.path = Path(core.cfg.state_file).with_name("debts.json")
-        self.items: dict[str, Debt] = {}
-        if self.path.is_file():
-            self.items = {d["id"]: Debt(**d) for d in json.loads(self.path.read_text(encoding="utf-8"))}
+        self._items: dict[str, Debt] = {}
+        self._mtime: float | None = None
+
+    @property
+    def items(self) -> dict[str, Debt]:
+        """Wczytuje plik ponownie, gdy zmienił się z zewnątrz (bez restartu bota)."""
+        mtime = self.path.stat().st_mtime if self.path.is_file() else None
+        if mtime != self._mtime:
+            self._mtime = mtime
+            self._items = (
+                {d["id"]: Debt(**d) for d in json.loads(self.path.read_text(encoding="utf-8"))} if mtime else {}
+            )
+        return self._items
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps([asdict(d) for d in self.items.values()], ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.write_text(json.dumps([asdict(d) for d in self._items.values()], ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.path)
+        self._mtime = self.path.stat().st_mtime
 
     def prompt_block(self) -> str:
         if not self.items:
             return "(brak)"
         return "\n".join(f"{d.id} | {d.name}" for d in self.items.values())
 
-    async def add(self, name: str, total: float, category_id: str | None = None) -> Debt:
+    async def add(
+        self,
+        name: str,
+        total: float,
+        category_id: str | None = None,
+        installment: float | None = None,
+        info: str | None = None,
+    ) -> Debt:
         did = re.sub(r"[^a-z0-9]+", "-", name.lower().translate(_PL)).strip("-")[:24] or "dlug"
         label_name = f"Dług: {name}"
         existing = next((l for l in await self.core.wallet.labels() if l.get("name") == label_name), None)
         label = existing or await self.core.wallet.create_label(label_name)
-        debt = Debt(did, name, round(abs(total), 2), self.core.today().isoformat(), label["id"], category_id)
+        debt = Debt(
+            did, name, round(abs(total), 2), self.core.today().isoformat(), label["id"], category_id, installment, info
+        )
         self.items[did] = debt
         self._save()
         return debt
@@ -79,10 +102,15 @@ class Debts:
             return f"🎉 *{debt.name}* spłacone! ({fmt_money(debt.total, cur)})"
         pct = paid / debt.total if debt.total else 1
         bar = "▓" * round(pct * 10) + "░" * (10 - round(pct * 10))
-        return (
+        line = (
             f"🏦 *{debt.name}*: zostało *{fmt_money(left, cur)}*\n"
             f"   {bar} {pct:.0%} · spłacono {fmt_money(paid, cur)} z {fmt_money(debt.total, cur)}"
         )
+        if debt.installment:
+            line += f"\n   ≈ {math.ceil(round(left / debt.installment, 2))} rat po {fmt_money(debt.installment, cur)}"
+        if debt.info:
+            line += f"\n   _{debt.info}_"
+        return line
 
 
 def parse_debt_command(text: str) -> tuple[str, float] | None:

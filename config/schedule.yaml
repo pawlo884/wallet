@@ -41,6 +41,15 @@ payments:
     rrule: FREQ=MONTHLY
     from: 2025-08-01
 
+  - id: kredyt-ca
+    name: Rata Credit Agricole
+    amount: 762.77
+    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
+    counterparty: Credit Agricole
+    rrule: FREQ=MONTHLY;COUNT=101   # 101 rat od 10.2026 (ostatnia 02.2035)
+    from: 2026-10-05
+    debt: credit-agricole           # potwierdzona rata zmniejsza dług w /dlugi
+
   - id: krecha
     name: Krecha
     amount: 964

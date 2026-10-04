@@ -38,6 +38,7 @@ class Payment:
     account: str | None = None  # nazwa lub ID; brak = konto domyślne
     active_from: date | None = None  # terminy wcześniejsze ignorowane (płatności dodane przez bota)
     source: str = "file"  # file = config/schedule.yaml, bot = dodane komendą /plan
+    debt: str | None = None  # id długu (/dlugi) — potwierdzona rata zmniejsza ten dług
 
     def to_json(self) -> dict:
         d = {
@@ -45,6 +46,7 @@ class Payment:
             "category_id": self.category_id, "rrule": self.rrule, "from": self.start.isoformat(),
             "counterparty": self.counterparty, "account": self.account,
             "active_from": self.active_from.isoformat() if self.active_from else None,
+            "debt": self.debt,
         }
         return {k: v for k, v in d.items() if v is not None}
 
@@ -65,6 +67,7 @@ class Payment:
             account=p.get("account"),
             active_from=_as_date(p["active_from"]) if p.get("active_from") else None,
             source=source,
+            debt=p.get("debt"),
         )
 
     def describe_rule(self) -> str:
@@ -377,6 +380,7 @@ class Planned:
             date=min(due, self.core.today()).isoformat(),
             counterparty=p.counterparty,
             note=p.name,
+            debt_id=p.debt if p.debt in self.core.debts.items else None,  # etykieta + „ile zostało”
         )
         reply = await self.core.save_records(owner, [record], occ_key=key)
         return reply
