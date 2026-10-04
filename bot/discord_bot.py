@@ -97,6 +97,17 @@ def build(core: Core) -> discord.Client:
             await message.reply(HELP.replace("Komendy:", "Komendy (z `!`):"))
             return
 
+        voice = next((a for a in message.attachments if (a.content_type or "").startswith("audio/")), None)
+        if voice:  # wiadomość głosowa Discorda / plik audio
+            async with message.channel.typing():
+                try:
+                    reply = await core.handle_voice(f"dc:{message.author.id}", await voice.read())
+                except Exception:
+                    log.exception("Błąd obsługi głosówki")
+                    reply = Reply("⚠️ Coś poszło nie tak. Spróbuj ponownie za chwilę.")
+            await send(message.channel, reply, reference=message)
+            return
+
         images = [
             (await a.read(), a.content_type.split(";")[0])
             for a in message.attachments

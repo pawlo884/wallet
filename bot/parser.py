@@ -86,7 +86,9 @@ Zasady:
   użytkownik i tak widzi szkic i może go poprawić.
 - Daty względne ("wczoraj", "w piątek") licz od dzisiejszej daty podanej w wiadomości.
   Brak daty = dzisiaj. Nigdy data w przyszłości.
-- counterparty: nazwa sklepu/firmy/osoby z wiadomości lub paragonu, w naturalnej formie ("Biedronka").
+- counterparty: nazwa sklepu/firmy/osoby z wiadomości lub paragonu, w mianowniku i naturalnej formie
+  ("w sowie" → "Sowa", "na orlenie" → "Orlen"). Gdy nie podano — null; nie wymyślaj ogólników
+  w stylu "Kawiarnia" czy "Sklep".
 - note: ZAWSZE wypełnij. To ma pozwolić użytkownikowi za kilka miesięcy przypomnieć sobie,
   na co dokładnie poszły pieniądze — kategoria i sklep tego nie mówią. 2–8 słów, po polsku,
   konkretnie: co kupione / za co zapłacone / dla kogo / po co, np. "doładowanie API Anthropic",

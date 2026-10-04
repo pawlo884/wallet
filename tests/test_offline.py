@@ -83,6 +83,17 @@ async def main():
     print((await core.balances()).text)
     print((await core.month_summary()).text)
 
+    # głosówka: transkrypcja → zwykły przepływ, transkrypt na górze odpowiedzi
+    class FakeSTT:
+        async def transcribe(self, audio):
+            assert audio == b"OggS..."
+            return "biedronka 54,30"
+    core.stt = FakeSTT()
+    v = await core.handle_voice("tg:1", b"OggS...")
+    print(v.text)
+    assert v.text.startswith("🎤 „biedronka 54,30”") and v.buttons[0][0] == "✅ Zapisz"
+    import bot.stt  # moduł importuje się bez ładowania modelu
+
     # adaptery się budują
     from bot import telegram_bot, discord_bot
     telegram_bot.build(core); discord_bot.build(core)

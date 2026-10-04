@@ -33,6 +33,11 @@ class Config:
     # Od której godziny (czas lokalny) wysyłać przypomnienia o płatnościach.
     reminder_hour: int = field(default_factory=lambda: int(os.getenv("REMINDER_HOUR", "9")))
 
+    # Mowa → tekst (lokalnie, faster-whisper). Modele: tiny/base/small/medium — większy = lepiej i wolniej.
+    stt_enabled: bool = field(default_factory=lambda: _bool("STT_ENABLED", True))
+    stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL", "small"))
+    stt_threads: int = field(default_factory=lambda: int(os.getenv("STT_THREADS", "4")))
+
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_allowed: set[int] = field(default_factory=lambda: _ids("TELEGRAM_ALLOWED_USERS"))
 

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
 from .fx import FX, FXError, resolve_code
+from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
 from .planned import Payment, Planned
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
@@ -68,6 +69,7 @@ class Core:
         self._saved: dict[str, tuple[str, list[str], str | None]] = {}
         self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
         self.fx = FX()
+        self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
@@ -152,6 +154,21 @@ class Core:
         if h and h[-1][1] == "user":  # bieżąca wiadomość dojdzie jako ostatnia tura użytkownika
             h = h[:-1]
         return [{"role": role, "content": text} for _, role, text in h]
+
+    async def handle_voice(self, owner: str, audio: bytes) -> Reply:
+        """Głosówka → tekst (lokalny Whisper) → dalej jak zwykła wiadomość."""
+        if not self.stt:
+            return Reply("🎤 Rozpoznawanie mowy jest wyłączone (STT_ENABLED=false).")
+        try:
+            text = await self.stt.transcribe(audio)
+        except Exception:
+            log.exception("Błąd rozpoznawania mowy")
+            return Reply("⚠️ Nie udało się odczytać nagrania. Spróbuj jeszcze raz albo napisz.")
+        if not text:
+            return Reply("🎤 Nic nie usłyszałem — nagraj jeszcze raz.")
+        reply = await self.handle_message(owner, text, [])
+        reply.text = f"🎤 „{text}”\n\n{reply.text}"
+        return reply
 
     async def handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
         reply = await self._handle_message(owner, text, images)

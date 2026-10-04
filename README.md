@@ -40,6 +40,17 @@ domeny ani HTTPS** na VPS.
 - Kwoty w obcej walucie („anthropic 15$”, „obiad 20 euro”) bot przelicza na walutę konta po średnim
   kursie NBP z dnia transakcji. Oryginał trafia do notatki, np. `15,00 USD po 3,8881 (NBP 02.10)`.
 
+## Głosówki (mowa → tekst)
+
+Wyślij wiadomość głosową na Telegramie albo Discordzie, np. *„biedronka pięćdziesiąt cztery trzydzieści”*.
+Bot rozpoznaje mowę **lokalnie na serwerze** (faster-whisper, model `small`, polski), pokazuje
+transkrypt 🎤 i dalej działa jak przy zwykłej wiadomości: szkic, ✅, poprawki.
+
+- Nagrania nie wychodzą z serwera i nic nie kosztują.
+- Model (~0,5 GB) pobiera się raz, w tle przy pierwszym starcie, do wolumenu `wallet-data`.
+- Kontener ma limit 1,5 GB RAM. Ustawienia `STT_MODEL` (tiny/base/small/medium), `STT_THREADS`
+  i `STT_ENABLED` są w `.env`.
+
 ## Płatności cykliczne
 
 Bot zastępuje „transakcje zaplanowane” z Wallet: API Wallet pozwala je tylko czytać, więc nie da się

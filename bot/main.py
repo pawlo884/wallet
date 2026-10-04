@@ -38,6 +38,8 @@ async def run() -> None:
         raise SystemExit("Ustaw TELEGRAM_BOT_TOKEN i/lub DISCORD_BOT_TOKEN")
     core = Core(cfg)
     await core.refresh_catalog(force=True)  # wcześnie wykrywa zły token Wallet
+    if core.stt:
+        stt_preload = asyncio.create_task(core.stt.preload())  # w tle; boty startują od razu  # noqa: F841
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

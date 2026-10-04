@@ -113,6 +113,19 @@ def build(core: Core) -> Application:
             on_message,
         )
     )
+
+    async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+        f = await (msg.voice or msg.audio).get_file()
+        try:
+            reply = await core.handle_voice(f"tg:{update.effective_user.id}", bytes(await f.download_as_bytearray()))
+        except Exception:
+            log.exception("Błąd obsługi głosówki")
+            reply = Reply("⚠️ Coś poszło nie tak. Spróbuj ponownie za chwilę.")
+        await send(update, reply)
+
+    app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
     app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep):"))
     return app
 
