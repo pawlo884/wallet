@@ -1,0 +1,128 @@
+# Płatności cykliczne obsługiwane przez bota (przeniesione z transakcji zaplanowanych Wallet 04.10.2026).
+# W dniu terminu bot wysyła przypomnienie: ✅ zapłacone / ✏️ inna kwota / ⏭ pomiń.
+# Po zmianach w tym pliku: /odswiez w bocie (bez restartu).
+#
+# Pola: id (a-z0-9_-, unikalne, NIE zmieniaj po starcie — po nim bot pamięta, co zapłacone),
+#       name, amount, type (expense|income), category_id, rrule (format iCal RRULE),
+#       from (data pierwszego terminu), opcjonalnie counterparty, account (nazwa lub ID konta).
+
+start: 2026-10-01   # terminy wcześniejsze są ignorowane
+
+payments:
+  # --- przychody ---
+  - id: wyplata-konto
+    name: Wypłata konto
+    amount: 3500
+    type: income
+    category_id: 5c5c2710-0064-8000-8000-000000000000   # Wage, invoices
+    rrule: FREQ=MONTHLY
+    from: 2025-08-01
+
+  - id: wyplata-gotowka
+    name: Wypłata gotówka
+    amount: 3500
+    type: income
+    category_id: 5c5c2710-0064-8000-8000-000000000000   # Wage, invoices
+    rrule: FREQ=MONTHLY
+    from: 2025-08-15
+
+  # --- mieszkanie i zobowiązania ---
+  - id: mieszkanie
+    name: Mieszkanie
+    amount: 1000
+    category_id: 5c5c0bbd-001e-8000-8000-000000000000   # Housing
+    rrule: FREQ=MONTHLY
+    from: 2025-08-01
+
+  - id: krecha
+    name: Krecha
+    amount: 964
+    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
+    rrule: FREQ=MONTHLY;COUNT=108
+    from: 2025-08-03
+
+  # --- ubezpieczenia ---
+  - id: ubezp-mbank
+    name: Ubezpieczenie mBank
+    amount: 30
+    category_id: 5c5c1f41-0050-8000-8000-000000000000   # Insurances
+    rrule: FREQ=MONTHLY
+    from: 2025-08-01
+
+  - id: ubezp-karina
+    name: Ubezpieczenie Karina
+    amount: 300
+    category_id: 5c5c1f41-0050-8000-8000-000000000000   # Insurances
+    rrule: FREQ=MONTHLY
+    from: 2025-12-15
+
+  - id: ubezp-a6
+    name: Ubezpieczenie A6
+    amount: 1400
+    category_id: 5c5c1392-0032-8000-8000-000000000000   # Insurance (Vehicle)
+    rrule: FREQ=YEARLY
+    from: 2025-12-12
+
+  # --- abonamenty ---
+  - id: multisport
+    name: Multi Sport Magda
+    amount: 225
+    category_id: 5c5c1772-003c-8000-8000-000000000000   # Active sport, fitness
+    rrule: FREQ=MONTHLY
+    from: 2025-09-03
+
+  - id: google
+    name: Google
+    amount: 8.99
+    category_id: 5c5c1b5b-0046-8000-8000-000000000000   # Software, apps, games
+    rrule: FREQ=MONTHLY
+    from: 2025-12-26
+
+  - id: skyshowtime
+    name: Skyshowtime
+    amount: 24.99
+    category_id: 5c5c1b5b-0046-8000-8000-000000000000   # Software, apps, games
+    rrule: FREQ=MONTHLY
+    from: 2025-12-27
+
+  - id: spotify
+    name: Spotify
+    amount: 30.99
+    category_id: 5c5c1b5b-0046-8000-8000-000000000000   # Software, apps, games
+    rrule: FREQ=MONTHLY
+    from: 2025-12-27
+
+  - id: cursor
+    name: Cursor abonament
+    amount: 100
+    category_id: 5c5c1b5b-0046-8000-8000-000000000000   # Software, apps, games
+    rrule: FREQ=MONTHLY
+    from: 2025-12-28
+
+  - id: ssd
+    name: Ssd
+    amount: 23.47
+    category_id: 5c5c1b5d-0046-8000-8000-000000000000   # PC, Communication
+    rrule: FREQ=MONTHLY;COUNT=13
+    from: 2025-11-30
+
+  # --- roczne ---
+  - id: grobek
+    name: Opłata za grobek
+    amount: 350
+    category_id: 5c5c07d5-0014-8000-8000-000000000000   # Pets & animals
+    rrule: FREQ=YEARLY
+    from: 2026-01-07
+
+  - id: kontener
+    name: Kontener
+    amount: 3500
+    category_id: 5c5c0bb8-001e-8000-8000-000000000000   # Rent
+    counterparty: Mobilne Kontenery
+    rrule: FREQ=YEARLY
+    from: 2026-01-10
+
+  # Pominięte przy przenoszeniu:
+  # - "A6 spłata" (1000 zł) — spłacone 9/9 rat.
+  # - "Jedzenie" (1150 zł/mies.) — to limit, nie płatność: zakupy wpisujesz na bieżąco przez bota,
+  #   więc jako płatność liczyłyby się podwójnie. Lepiej jako budżet w Wallet (kategoria Groceries).

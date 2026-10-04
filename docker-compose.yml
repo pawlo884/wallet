@@ -10,7 +10,7 @@ services:
     # Bot łączy się tylko na zewnątrz (Telegram long polling, Discord gateway,
     # Wallet API, Anthropic API) — nie potrzebuje żadnych otwartych portów.
     volumes:
-      # Płatności cykliczne (plik tylko na serwerze — nie ma go w repo).
+      # Płatności cykliczne.
       - ./schedule.yaml:/app/schedule.yaml:ro
       # Stan: co zapłacone / pominięte / przypomniane. Przetrwa restart i przebudowę.
       - wallet-data:/app/data

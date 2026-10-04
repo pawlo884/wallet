@@ -1,4 +1,4 @@
-# Przykład — skopiuj do schedule.yaml i dopasuj. schedule.yaml jest w .gitignore (dane osobiste).
+# Przykład formatu — właściwa lista jest w schedule.yaml.
 # W dniu terminu bot wysyła przypomnienie: ✅ zapłacone / ✏️ inna kwota / ⏭ pomiń.
 # Po zmianach: /odswiez w bocie.
 #

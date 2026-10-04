@@ -31,8 +31,7 @@ domeny ani HTTPS** na VPS.
 ## Płatności cykliczne
 
 Bot zastępuje „transakcje zaplanowane” z Wallet: API Wallet pozwala je tylko czytać, więc nie da się
-ich potwierdzać zdalnie. Lista płatności jest w pliku `schedule.yaml` (wzór: `schedule.example.yaml`;
-prawdziwy plik jest w `.gitignore`, bo zawiera dane osobiste).
+ich potwierdzać zdalnie. Lista płatności jest w pliku `schedule.yaml` (wzór pól: `schedule.example.yaml`).
 
 W dniu terminu, od godziny `REMINDER_HOUR`, bot wysyła przypomnienie:
 
@@ -85,7 +84,6 @@ przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CL
 # na VPS
 git clone <repo> wallet && cd wallet     # albo: scp -r wallet pawel@192.168.50.31:~/
 cp .env.example .env && nano .env
-cp schedule.example.yaml schedule.yaml && nano schedule.yaml   # albo scp swojego pliku
 docker compose up -d --build
 docker compose logs -f
 ```
