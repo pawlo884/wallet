@@ -440,9 +440,12 @@ class Core:
         end = (start + timedelta(days=32)).replace(day=1)
         try:
             await self.refresh_catalog()
+            # Tylko aktywne konta liczone do statystyk — archiwum (stara historia) nie może dublować wydatków.
+            counted = [a for a, acc in self._accounts.items() if not acc.get("excludeFromStats")][:10]
             records = await self.wallet.records(
-                start.isoformat(), end.isoformat(), isTransfer="false", convertTo=self.cfg.base_currency
-            )
+                start.isoformat(), end.isoformat(), isTransfer="false", convertTo=self.cfg.base_currency,
+                accountId=",".join(counted),
+            ) if counted else []
         except WalletError as e:
             return Reply(f"⚠️ {e}")
 

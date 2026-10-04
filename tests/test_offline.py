@@ -81,7 +81,15 @@ async def main():
     undo = await core.handle_callback("tg:1", saved.buttons[0][1])
     print(undo.text); assert core.wallet.deleted == ["r0", "r1"]
     print((await core.balances()).text)
+    seen = {}
+    orig_records = core.wallet.records
+    async def spy(*a, **k):
+        seen.update(k)
+        return await orig_records(*a, **k)
+    core.wallet.records = spy
     print((await core.month_summary()).text)
+    assert seen.get("accountId") == "pln,eur", "podsumowanie tylko z aktywnych kont (bez archiwum)"
+    core.wallet.records = orig_records
 
     # głosówka: transkrypcja → zwykły przepływ, transkrypt na górze odpowiedzi
     class FakeSTT:
