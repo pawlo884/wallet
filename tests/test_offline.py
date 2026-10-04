@@ -69,3 +69,52 @@ async def main():
     print("\nOK")
 
 asyncio.run(main())
+
+
+async def planned():
+    """Płatności cykliczne na prawdziwym schedule.yaml (lub przykładzie)."""
+    import tempfile
+    from pathlib import Path
+    from bot.planned import Planned
+
+    sched = "schedule.yaml" if Path("schedule.yaml").exists() else "schedule.example.yaml"
+    state = Path(tempfile.mkdtemp()) / "state.json"
+    os.environ.update(SCHEDULE_FILE=sched, STATE_FILE=str(state))
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), FakeParser()
+    core.today = lambda: __import__("datetime").date(2026, 10, 4)
+    today = core.today()
+
+    pending = core.planned.pending(today)
+    print("\nDo potwierdzenia:", [(p.id, str(d)) for p, d in pending])
+    first = await core.due_reminders()
+    assert len(first) == len(pending) and await core.due_reminders() == [], "max 1 przypomnienie dziennie"
+    print(first[0].text, first[0].buttons)
+
+    keys = {p.id: f"{p.id}@{d:%Y%m%d}" for p, d in pending}
+    if "mieszkanie" in keys:
+        r = await core.handle_callback("tg:1", f"sp:{keys['mieszkanie']}")
+        print(r.text)
+        rec = core.wallet.created[-1]
+        assert rec["amount"]["value"] == -1000 and rec["recordDate"].startswith("2026-10-01"), rec
+        assert (await core.handle_callback("tg:1", f"sp:{keys['mieszkanie']}")).text.startswith("Już")
+        undo = await core.handle_callback("tg:1", r.buttons[0][1])
+        assert keys["mieszkanie"] in {f"{p.id}@{d:%Y%m%d}" for p, d in core.planned.pending(today)}, "cofnięcie przywraca termin"
+        print(undo.text)
+
+        print((await core.handle_callback("tg:1", f"sa:{keys['krecha']}")).text)
+        r = await core.handle_message("tg:1", "950,50", [])
+        print(r.text)
+        assert core.wallet.created[-1]["amount"]["value"] == -950.5
+
+        print((await core.handle_callback("tg:1", f"ss:{keys['multisport']}")).text)
+        reloaded = Planned(core)  # stan z pliku
+        assert reloaded.state.handled(keys["multisport"])["status"] == "skipped"
+        assert reloaded.state.handled(keys["krecha"])["status"] == "paid"
+
+    for r in await core.planned_overview():
+        print("---\n" + r.text, r.buttons or "")
+    print("\nOK planned")
+
+
+asyncio.run(planned())

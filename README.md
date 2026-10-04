@@ -24,8 +24,27 @@ domeny ani HTTPS** na VPS.
 | 📷 zdjęcie paragonu | suma z paragonu, sklep, data |
 | `/saldo` (`!saldo` na Discordzie) | salda kont |
 | `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
-| `/odswiez` | ponowne pobranie kont i kategorii (np. po dodaniu nowej kategorii w aplikacji) |
+| `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia + najbliższe 30 dni |
+| `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
+
+## Płatności cykliczne
+
+Bot zastępuje „transakcje zaplanowane” z Wallet: API Wallet pozwala je tylko czytać, więc nie da się
+ich potwierdzać zdalnie. Lista płatności jest w pliku `schedule.yaml` (wzór: `schedule.example.yaml`;
+prawdziwy plik jest w `.gitignore`, bo zawiera dane osobiste).
+
+W dniu terminu, od godziny `REMINDER_HOUR`, bot wysyła przypomnienie:
+
+> 📅 **Dziś:** Ubezpieczenie −300,00 PLN  [✅ Zapłacone] [✏️ Inna kwota] [⏭ Pomiń]
+
+- **✅** zapisuje rekord z datą terminu.
+- **✏️** prosi o kwotę: odpisujesz np. `312,40`.
+- **⏭** oznacza termin jako pominięty.
+
+Niepotwierdzone terminy przypominają się codziennie do skutku. Stan (co zapłacone, a co pominięte)
+leży w wolumenie `wallet-data`, więc przetrwa restart i przebudowę. „Cofnij” po zapisie przywraca
+termin na listę.
 
 ## Konfiguracja krok po kroku
 
@@ -66,6 +85,7 @@ przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CL
 # na VPS
 git clone <repo> wallet && cd wallet     # albo: scp -r wallet pawel@192.168.50.31:~/
 cp .env.example .env && nano .env
+cp schedule.example.yaml schedule.yaml && nano schedule.yaml   # albo scp swojego pliku
 docker compose up -d --build
 docker compose logs -f
 ```
@@ -92,6 +112,7 @@ Test bez sieci (atrapy Wallet i Claude): `python -m tests.test_offline`
 bot/
   main.py          start obu botów w jednej pętli asyncio
   core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca
+  planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
   parser.py        Claude (structured outputs) → lista rekordów
   wallet_api.py    klient Wallet REST API (paginacja, 409 sync, 429 limit)
   telegram_bot.py  adapter Telegram (python-telegram-bot)
@@ -101,7 +122,7 @@ bot/
 
 ## Uwagi
 
-- Szkice i przyciski „Cofnij” są trzymane w pamięci, więc po restarcie kontenera stare przyciski przestają działać.
+- Szkice, przycisk „Cofnij” i oczekiwanie na kwotę (✏️) są trzymane w pamięci, więc po restarcie kontenera stare przyciski przestają działać.
   Same rekordy w Wallet zostają.
 - Limit Wallet API to 500 zapytań na godzinę. Bot zużywa 1 zapytanie na zapis i kilka na `/miesiac`.
 - Kategorie i konta są cache'owane przez godzinę. Po zmianach w aplikacji użyj `/odswiez`.

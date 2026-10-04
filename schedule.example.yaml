@@ -1,0 +1,39 @@
+# Przykład — skopiuj do schedule.yaml i dopasuj. schedule.yaml jest w .gitignore (dane osobiste).
+# W dniu terminu bot wysyła przypomnienie: ✅ zapłacone / ✏️ inna kwota / ⏭ pomiń.
+# Po zmianach: /odswiez w bocie.
+#
+# Pola: id (a-z0-9_-, unikalne, nie zmieniaj później), name, amount, type (expense|income),
+#       category_id (ID kategorii Wallet), rrule (iCal RRULE), from (pierwszy termin),
+#       opcjonalnie counterparty, account (nazwa lub ID konta; domyślnie DEFAULT_ACCOUNT).
+
+start: 2026-10-01   # terminy wcześniejsze są ignorowane
+
+payments:
+  - id: wyplata
+    name: Wypłata
+    amount: 5000
+    type: income
+    category_id: 5c5c2710-0064-8000-8000-000000000000   # Wage, invoices
+    rrule: FREQ=MONTHLY
+    from: 2026-01-10
+
+  - id: czynsz
+    name: Czynsz
+    amount: 1800
+    category_id: 5c5c0bb8-001e-8000-8000-000000000000   # Rent
+    rrule: FREQ=MONTHLY
+    from: 2026-01-01
+
+  - id: netflix
+    name: Netflix
+    amount: 49
+    category_id: 5c5c1b5b-0046-8000-8000-000000000000   # Software, apps, games
+    rrule: FREQ=MONTHLY
+    from: 2026-01-15
+
+  - id: oc-auta
+    name: OC samochodu
+    amount: 1200
+    category_id: 5c5c1392-0032-8000-8000-000000000000   # Insurance (Vehicle)
+    rrule: FREQ=YEARLY
+    from: 2026-03-20

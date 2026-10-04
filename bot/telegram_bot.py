@@ -22,19 +22,22 @@ def _markup(reply: Reply) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reply.buttons]])
 
 
+async def _send(bot, chat_id: int, reply: Reply) -> None:
+    try:
+        await bot.send_message(chat_id, reply.text, parse_mode=ParseMode.MARKDOWN, reply_markup=_markup(reply))
+    except Exception:  # np. znak psujący Markdown w nazwie sklepu
+        await bot.send_message(chat_id, reply.text, reply_markup=_markup(reply))
+
+
 def build(core: Core) -> Application:
     allowed = core.cfg.telegram_allowed
     app = Application.builder().token(core.cfg.telegram_token).build()
     # Pusta lista = nikt (poza /whoami). Bot ma dostęp do Twoich finansów — bez wyjątków.
     user_filter = filters.User(user_id=allowed)
 
-    async def send(update: Update, reply: Reply) -> None:
-        try:
-            await update.effective_message.reply_text(
-                reply.text, parse_mode=ParseMode.MARKDOWN, reply_markup=_markup(reply)
-            )
-        except Exception:  # np. znak psujący Markdown w nazwie sklepu
-            await update.effective_message.reply_text(reply.text, reply_markup=_markup(reply))
+    async def send(update: Update, replies: Reply | list[Reply]) -> None:
+        for reply in replies if isinstance(replies, list) else [replies]:
+            await _send(update.get_bot(), update.effective_chat.id, reply)
 
     async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, Reply(HELP + f"\n\nTwoje Telegram ID: `{update.effective_user.id}`"))
@@ -63,8 +66,15 @@ def build(core: Core) -> Application:
 
     async def on_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         q = update.callback_query
+        if update.effective_user.id not in allowed:
+            await q.answer("Brak dostępu")
+            return
         await q.answer()
-        reply = await core.handle_callback(f"tg:{update.effective_user.id}", q.data)
+        try:
+            reply = await core.handle_callback(f"tg:{update.effective_user.id}", q.data)
+        except Exception:
+            log.exception("Błąd obsługi przycisku")
+            reply = Reply("⚠️ Coś poszło nie tak. Spróbuj ponownie za chwilę.")
         await q.edit_message_reply_markup(None)
         await send(update, reply)
 
@@ -77,6 +87,7 @@ def build(core: Core) -> Application:
     app.add_handler(CommandHandler(["start", "pomoc", "help"], on_start, filters=user_filter))
     app.add_handler(CommandHandler("saldo", cmd(core.balances), filters=user_filter))
     app.add_handler(CommandHandler("miesiac", cmd(core.month_summary), filters=user_filter))
+    app.add_handler(CommandHandler("zaplanowane", cmd(core.planned_overview), filters=user_filter))
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
     app.add_handler(
         MessageHandler(
@@ -84,8 +95,21 @@ def build(core: Core) -> Application:
             on_message,
         )
     )
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss):"))
     return app
+
+
+def notifier(app: Application, core: Core):
+    """Wysyła wiadomość z inicjatywy bota do każdej dozwolonej osoby (czat prywatny = ID użytkownika)."""
+
+    async def notify(reply: Reply) -> None:
+        for uid in core.cfg.telegram_allowed:
+            try:
+                await _send(app.bot, uid, reply)
+            except Exception:
+                log.exception("Telegram: nie udało się wysłać do %s (czy napisałeś do bota /start?)", uid)
+
+    return notify
 
 
 async def start(core: Core) -> Application:

@@ -13,6 +13,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("wallet-bot")
 
+CHECK_EVERY = 300  # s
+
+
+async def reminder_loop(core: Core, notifiers: list) -> None:
+    """Raz na kilka minut: po godzinie REMINDER_HOUR wysyła przypomnienia o terminach
+    płatności (każdy termin najwyżej raz dziennie — stan w pliku, więc restart nie dubluje)."""
+    from datetime import datetime
+
+    while True:
+        try:
+            if datetime.now(core.cfg.tz).hour >= core.cfg.reminder_hour:
+                for reply in await core.due_reminders():
+                    for notify in notifiers:
+                        await notify(reply)
+        except Exception:
+            log.exception("Błąd pętli przypomnień")
+        await asyncio.sleep(CHECK_EVERY)
+
 
 async def run() -> None:
     cfg = Config()
@@ -31,12 +49,14 @@ async def run() -> None:
 
     tg_app = None
     dc_task = None
+    notifiers = []
     if cfg.telegram_token:
         from . import telegram_bot
 
         if not cfg.telegram_allowed:
             log.warning("TELEGRAM_ALLOWED_USERS puste — bot odpowie tylko na /whoami")
         tg_app = await telegram_bot.start(core)
+        notifiers.append(telegram_bot.notifier(tg_app, core))
     if cfg.discord_token:
         from . import discord_bot
 
@@ -51,11 +71,18 @@ async def run() -> None:
                 stop.set()  # restart kontenera przez Dockera
 
         dc_task.add_done_callback(on_discord_exit)
+        notifiers.append(discord_bot.notifier(dc_client, core))
+
+    reminders = None
+    if core.planned.enabled:
+        reminders = asyncio.create_task(reminder_loop(core, notifiers))
 
     try:
         await stop.wait()
     finally:
         log.info("Zamykanie…")
+        if reminders:
+            reminders.cancel()
         if tg_app:
             await telegram_bot.stop(tg_app)
         if dc_task:

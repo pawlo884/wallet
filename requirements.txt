@@ -4,4 +4,6 @@ pydantic>=2.7
 python-telegram-bot>=21.6,<23
 discord.py>=2.4,<3
 python-dotenv>=1.0
+pyyaml>=6.0
+python-dateutil>=2.9
 tzdata>=2024.1

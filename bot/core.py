@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
+from .planned import Planned
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
 
 log = logging.getLogger(__name__)
@@ -49,7 +50,9 @@ class Core:
         self._catalog_at = 0.0
         self._catalog_lock = asyncio.Lock()
         self._drafts: dict[str, _Draft] = {}
-        self._saved: dict[str, tuple[str, list[str]]] = {}  # klucz → (właściciel, id rekordów)
+        # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
+        self._saved: dict[str, tuple[str, list[str], str | None]] = {}
+        self.planned = Planned(self)
 
     # ---------- katalog kont i kategorii ----------
 
@@ -76,13 +79,21 @@ class Core:
             self._catalog_at = time.time()
             log.info("Katalog: %d kont, %d kategorii", len(self._accounts), len(self._categories))
 
-    def _resolve_default_account(self) -> str:
-        want = self.cfg.default_account.strip()
+    def _find_account(self, want: str | None) -> str | None:
+        want = (want or "").strip()
         if want in self._accounts:
             return want
         for a in self._accounts.values():
             if want and a["name"].lower() == want.lower():
                 return a["id"]
+        return None
+
+    def resolve_account(self, want: str | None) -> str:
+        return self._find_account(want) or self._default_account_id
+
+    def _resolve_default_account(self) -> str:
+        if found := self._find_account(self.cfg.default_account):
+            return found
         # Bez konfiguracji: konto w walucie bazowej z największą liczbą rekordów.
         candidates = sorted(
             self._accounts.values(),
@@ -96,7 +107,7 @@ class Core:
 
     # ---------- wiadomości ----------
 
-    def _today(self) -> date:
+    def today(self) -> date:
         return datetime.now(self.cfg.tz).date()
 
     def _cleanup(self) -> None:
@@ -104,18 +115,20 @@ class Core:
         self._drafts = {k: d for k, d in self._drafts.items() if d.created > cutoff}
 
     async def handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
+        if not images and (amount_reply := await self.planned.maybe_amount_reply(owner, text)):
+            return amount_reply
         try:
             await self.refresh_catalog()
         except WalletError as e:
             return Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")
-        result = await self.parser.parse(text, images, self._today(), self._catalog_prompt)
+        result = await self.parser.parse(text, images, self.today(), self._catalog_prompt)
         if not result.records:
             return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
 
         records = [self._sanitize(r) for r in result.records]
         self._cleanup()
         if not self.cfg.require_confirmation:
-            return await self._save(owner, records)
+            return await self.save_records(owner, records)
 
         key = secrets.token_urlsafe(6)
         self._drafts[key] = _Draft(owner, records)
@@ -126,6 +139,8 @@ class Core:
 
     async def handle_callback(self, owner: str, data: str) -> Reply:
         action, _, key = data.partition(":")
+        if action in ("sp", "sa", "ss"):
+            return await self.planned.handle_callback(owner, action, key)
         if action in ("ok", "no"):
             draft = self._drafts.get(key)
             if not draft or draft.owner != owner:
@@ -133,7 +148,7 @@ class Core:
             del self._drafts[key]
             if action == "no":
                 return Reply("❌ Anulowano.")
-            return await self._save(owner, draft.records)
+            return await self.save_records(owner, draft.records)
         if action == "undo":
             saved = self._saved.pop(key, None)
             if not saved or saved[0] != owner:
@@ -141,11 +156,14 @@ class Core:
             try:
                 await self.wallet.delete_records(saved[1])
             except WalletError as e:
+                self._saved[key] = saved
                 return Reply(f"⚠️ Nie udało się cofnąć: {e}")
+            if saved[2]:
+                self.planned.state.unmark(saved[2])  # termin wraca na listę do potwierdzenia
             return Reply(f"↩️ Usunięto {len(saved[1])} rekord(y) z Wallet.")
         return Reply("Nieznana akcja.")
 
-    async def _save(self, owner: str, records: list[ParsedRecord]) -> Reply:
+    async def save_records(self, owner: str, records: list[ParsedRecord], occ_key: str | None = None) -> Reply:
         payload = [self._to_wallet(r) for r in records]
         try:
             results = await self.wallet.create_records(payload)
@@ -161,8 +179,10 @@ class Core:
             lines.append("⚠️ Błędy: " + "; ".join(errors))
         buttons = []
         if ok_ids:
+            if occ_key:
+                self.planned.state.mark(occ_key, "paid", ok_ids, records[0].amount)
             key = secrets.token_urlsafe(6)
-            self._saved[key] = (owner, ok_ids)
+            self._saved[key] = (owner, ok_ids, occ_key)
             buttons.append(("↩️ Cofnij", f"undo:{key}"))
         return Reply("\n".join(lines) or "⚠️ Nic nie zapisano.", buttons)
 
@@ -173,7 +193,7 @@ class Core:
             r.account_id = self._default_account_id
         if r.category_id not in self._categories:
             r.category_id = UNKNOWN_INCOME if r.type == "income" else UNKNOWN_EXPENSE
-        today = self._today()
+        today = self.today()
         try:
             d = date.fromisoformat(r.date)
         except ValueError:
@@ -184,7 +204,7 @@ class Core:
 
     def _to_wallet(self, r: ParsedRecord) -> dict:
         d = date.fromisoformat(r.date)
-        if d == self._today():
+        if d == self.today():
             when = datetime.now(timezone.utc)
         else:
             when = datetime(d.year, d.month, d.day, 12, tzinfo=self.cfg.tz).astimezone(timezone.utc)
@@ -229,7 +249,7 @@ class Core:
         return Reply("\n".join(lines))
 
     async def month_summary(self) -> Reply:
-        today = self._today()
+        today = self.today()
         start = today.replace(day=1)
         end = (start + timedelta(days=32)).replace(day=1)
         try:
@@ -266,12 +286,24 @@ class Core:
                 lines.append(f"• {name}: {fmt_money(-v, cur)} ({v / expense:.0%})")
         return Reply("\n".join(lines))
 
+    async def planned_overview(self) -> list[Reply]:
+        return await self.planned.overview(self.today())
+
+    async def due_reminders(self) -> list[Reply]:
+        return await self.planned.due_reminders(self.today())
+
     async def refresh(self) -> Reply:
         try:
             await self.refresh_catalog(force=True)
+            self.planned.reload()
         except WalletError as e:
             return Reply(f"⚠️ {e}")
-        return Reply(f"🔄 Odświeżono: {len(self._accounts)} kont, {len(self._categories)} kategorii.")
+        except Exception as e:  # np. błąd w schedule.yaml
+            return Reply(f"⚠️ Błąd harmonogramu: {e}")
+        return Reply(
+            f"🔄 Odświeżono: {len(self._accounts)} kont, {len(self._categories)} kategorii, "
+            f"{len(self.planned.schedule.payments)} płatności cyklicznych."
+        )
 
     async def close(self) -> None:
         await self.wallet.close()
@@ -287,4 +319,6 @@ Po prostu napisz, np.:
 • `obiad 20 euro`  → konto w EUR
 albo wyślij *zdjęcie paragonu*.
 
-Komendy: saldo · miesiac · odswiez · pomoc"""
+Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
+
+Komendy: saldo · miesiac · zaplanowane · odswiez · pomoc"""

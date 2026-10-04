@@ -9,6 +9,11 @@ services:
       TZ: Europe/Warsaw
     # Bot łączy się tylko na zewnątrz (Telegram long polling, Discord gateway,
     # Wallet API, Anthropic API) — nie potrzebuje żadnych otwartych portów.
+    volumes:
+      # Płatności cykliczne (plik tylko na serwerze — nie ma go w repo).
+      - ./schedule.yaml:/app/schedule.yaml:ro
+      # Stan: co zapłacone / pominięte / przypomniane. Przetrwa restart i przebudowę.
+      - wallet-data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -20,3 +25,6 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+
+volumes:
+  wallet-data:
