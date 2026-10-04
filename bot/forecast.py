@@ -176,7 +176,12 @@ async def build(core: "Core") -> dict:
         insights.append({"kind": "warn", "title": "Za duże wpłaty na oszczędności",
                          "text": f"Po odłożeniu na konta oszczędnościowe brakuje pieniędzy w: {_m(neg_free[0])}. Zmniejsz wpłaty w config/forecast.yaml albo ustaw im późniejszy start (from)."})
     for s in savings:
-        if s["target"]:
+        if s["target"] and not s["monthly"]:  # wpłaty tylko z dodatkowych dochodów
+            missing = max(s["target"] - s["balance"], 0)
+            insights.append({"kind": "ok" if not missing else "info", "title": s["name"],
+                             "text": f"Wpłaty z dodatkowych dochodów. Jest {_z(s['balance'])} z {_z(s['target'])}"
+                                     + (f", brakuje {_z(missing)}." if missing else " — cel osiągnięty.")})
+        elif s["target"]:
             insights.append({"kind": "ok" if s["reach"] else "info", "title": s["name"],
                              "text": (f"Cel {_z(s['target'])} osiągnięty: {_m(s['reach'])}, przy {_z(s['monthly'])}/mies."
                                       if s["reach"] else f"Przy {_z(s['monthly'])}/mies. cel {_z(s['target'])} poza horyzontem.")

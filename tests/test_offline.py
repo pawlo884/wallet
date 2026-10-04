@@ -453,8 +453,16 @@ async def forecast_web_transfer():
     from bot import forecast, web
 
     tmp = Path(tempfile.mkdtemp())
+    # Własne założenia testowe — prawdziwe config/forecast.yaml może się zmieniać.
+    (tmp / "forecast.yaml").write_text(
+        "months: 12\nliving: {oszczędny: 900, bazowy: 1400, luźny: 2000}\nsavings:\n"
+        "  - {account: Awaryjne, target: 3000, monthly: 300}\n"
+        "  - {account: Poduszka finansowa, target: 11600, monthly: 500, from: 2027-02}\n"
+        "  - {account: Extra, target: 1000, monthly: 0}\n",
+        encoding="utf-8",
+    )
     os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(tmp / "s.json"),
-                      FORECAST_FILE="config/forecast.yaml")
+                      FORECAST_FILE=str(tmp / "forecast.yaml"))
     ACC.append({"id": "awar", "name": "Awaryjne", "currencyCode": "PLN", "balance": {"currentBalance": 0}})
 
     class TransferParser(FakeParser):
@@ -472,8 +480,11 @@ async def forecast_web_transfer():
     jan = next(r for r in f["rows"] if r["month"] == "2027-01")
     assert {y["name"] for y in jan["yearly"]} >= {"Kontener", "Opłata za grobek"}
     assert jan["net_bazowy"] < 0 and any("na minusie" in i["title"] for i in f["insights"])
-    assert [s["name"] for s in f["savings"]] == ["Awaryjne", "Poduszka finansowa"] and f["savings"][0]["found"]
+    assert [s["name"] for s in f["savings"]] == ["Awaryjne", "Poduszka finansowa", "Extra"] and f["savings"][0]["found"]
     assert f["rows"][0]["savings"] == 300 and f["rows"][4]["savings"] == 800 and f["rows"][-1]["cum_free"] < f["rows"][-1]["cum_bazowy"]
+    assert any(i["title"] == "Extra" and "dodatkowych dochodów" in i["text"] and "brakuje 1 000 zł" in i["text"] for i in f["insights"])
+    # prawdziwa konfiguracja też musi się poprawnie wczytać
+    assert forecast.load_assumptions("config/forecast.yaml")["savings"]
     print(forecast.summary_text(f, "https://wallet.example"))
     js.dumps(f)
 

@@ -10,14 +10,13 @@ living:
   bazowy: 1400
   luźny: 2000
 
-# Konta oszczędnościowe (nazwy jak w Wallet). target: cel w zł; monthly: planowana wpłata miesięcznie;
-# from: od którego miesiąca wpłacać (RRRR-MM, opcjonalnie).
+# Konta oszczędnościowe (nazwy jak w Wallet). target: cel w zł; monthly: stała wpłata miesięcznie
+# (0 = wpłaty tylko z dodatkowych dochodów); from: od którego miesiąca wpłacać (RRRR-MM, opcjonalnie).
 # Wpłaty to przelewy z konta Ogólne (w bocie: „300 na awaryjne”) — nie są wydatkiem, ale zmniejszają wolne środki.
 savings:
   - account: Awaryjne
     target: 3000          # na pilne, niespodziewane wydatki (awaria auta, lekarz)
-    monthly: 300
+    monthly: 0            # z dodatkowych dochodów
   - account: Poduszka finansowa
     target: 11600         # ≈ 3 miesiące kosztów stałych
-    monthly: 500
-    from: 2027-02         # po styczniowych opłatach rocznych (kontener, grób)
+    monthly: 0            # z dodatkowych dochodów
