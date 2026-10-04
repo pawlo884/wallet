@@ -588,6 +588,22 @@ async def investments():
     f = await forecast.build(core)
     assert f["worth"]["investments"] == 470.62
     assert "Majątek netto" in forecast.summary_text(f)
+    # konto „Srebro” w Wallet: codzienna wycena przez saldo początkowe, bez liczenia podwójnie w majątku
+    ACC.append({"id": "silv", "name": "Srebro", "currencyCode": "PLN", "balance": {"currentBalance": 400.0, "initial": 400.0}})
+    patched = []
+    async def set_initial(aid, initial):
+        patched.append((aid, initial))
+    core.wallet.set_initial_balance = set_initial
+    items = core.investments.items
+    hid = next(iter(items))
+    items[hid].account = "Srebro"
+    core.investments._write(items)
+    await core.refresh_catalog(force=True)
+    done = await core.investments.sync_accounts()
+    assert patched == [("silv", 470.62)] and done, (patched, done)
+    f2 = await forecast.build(core)
+    assert f2["worth"]["accounts"] == f["worth"]["accounts"], "konto Srebro nie dubluje inwestycji"
+    ACC.pop()
     assert (await core.handle_callback("tg:1", f"iry:{lst.buttons[0][1][3:]}")).text.startswith("🗑")
     assert not core.investments.items
     print("\nOK investments")

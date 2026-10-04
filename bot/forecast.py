@@ -191,8 +191,9 @@ async def build(core: "Core") -> dict:
 
     # --- majątek: salda kont (EUR po kursie NBP) + inwestycje − długi ---
     accounts_pln = 0.0
+    mirrored = core.investments.linked_accounts()  # konto „Srebro” = ta sama wartość co inwestycja
     for acc in live.values():
-        if acc.get("excludeFromStats"):
+        if acc.get("excludeFromStats") or acc["id"] in mirrored:
             continue
         bal = float((acc.get("balance") or {}).get("currentBalance", 0))
         cur = acc.get("currencyCode") or "PLN"

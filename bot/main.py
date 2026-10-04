@@ -23,14 +23,22 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
     płatności (każdy termin najwyżej raz dziennie — stan w pliku, więc restart nie dubluje)."""
     from datetime import datetime
 
+    synced_on = None  # wycena kont inwestycyjnych (np. „Srebro”) — raz dziennie
     while True:
+        now = datetime.now(core.cfg.tz)
         try:
-            if datetime.now(core.cfg.tz).hour >= core.cfg.reminder_hour:
+            if now.hour >= core.cfg.reminder_hour:
                 for reply in await core.due_reminders():
                     for notify in notifiers:
                         await notify(reply)
         except Exception:
             log.exception("Błąd pętli przypomnień")
+        if synced_on != now.date() and now.hour >= core.cfg.reminder_hour:
+            try:
+                await core.investments.sync_accounts()
+                synced_on = now.date()
+            except Exception as e:  # brak ceny / sieci — spróbuje przy następnym obrocie pętli
+                log.warning("Wycena kont inwestycyjnych: %r", e)
         await asyncio.sleep(CHECK_EVERY)
 
 

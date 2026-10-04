@@ -35,6 +35,7 @@ class Holding:
     unit: str = "oz"
     cost: float | None = None  # łączny koszt zakupu w PLN
     bought: str | None = None  # kiedy kupione (rok lub data, tekst)
+    account: str | None = None  # konto w Wallet (nazwa/ID), którego saldo bot codziennie ustawia na wycenę
 
 
 class Investments:
@@ -100,7 +101,7 @@ class Investments:
         today = self.core.today()
         for h in self.items.values():
             row = {"id": h.id, "name": h.name, "symbol": h.symbol, "quantity": h.quantity, "unit": h.unit,
-                   "cost": h.cost, "bought": h.bought, "value": None, "unit_pln": None, "error": None}
+                   "cost": h.cost, "bought": h.bought, "account": h.account, "value": None, "unit_pln": None, "error": None}
             try:
                 price, cur = await self._quote(h)
                 unit_pln, _, _ = await self.core.fx.convert(price, cur, "PLN", today)
@@ -113,6 +114,33 @@ class Investments:
                 row["error"] = "brak aktualnej ceny"
             out.append(row)
         return out
+
+    def linked_accounts(self) -> set[str]:
+        """ID kont Wallet odzwierciedlających inwestycje (żeby majątek nie liczył ich podwójnie)."""
+        return {aid for h in self.items.values() if h.account and (aid := self.core._find_account(h.account))}
+
+    async def sync_accounts(self) -> list[str]:
+        """Ustawia saldo powiązanych kont Wallet na bieżącą wycenę — przez saldo początkowe,
+        więc wahania ceny nie pojawiają się w statystykach jako przychody/wydatki."""
+        await self.core.refresh_catalog()
+        live = {a["id"]: a for a in await self.core.wallet.accounts()}
+        done = []
+        for row in await self.valuate():
+            h = self.items.get(row["id"])
+            if not h or not h.account or row["value"] is None:
+                continue
+            acc = live.get(self.core._find_account(h.account) or "")
+            if not acc:
+                log.warning("Inwestycja %s: brak konta „%s” w Wallet", h.name, h.account)
+                continue
+            bal = acc.get("balance") or {}
+            diff = round(row["value"] - float(bal.get("currentBalance", 0)), 2)
+            if abs(diff) >= 0.01:
+                await self.core.wallet.set_initial_balance(acc["id"], float(bal.get("initial", 0)) + diff)
+            done.append(f"{acc['name']}: {row['value']:.2f} zł ({diff:+.2f})")
+        if done:
+            log.info("Wycena kont inwestycyjnych: %s", "; ".join(done))
+        return done
 
     async def close(self) -> None:
         await self._http.aclose()

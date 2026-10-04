@@ -703,6 +703,8 @@ class Core:
                 line += f"\n   zakup {fmt_money(r['cost'], 'PLN')} → {'+' if r['gain'] >= 0 else ''}{fmt_money(r['gain'], 'PLN')} ({f"{r['gain_pct']:+.1f}".replace(".", ",")}%)"
             elif r.get("bought"):
                 line += f"\n   kupione {r['bought']} — podaj koszt zakupu, żeby liczyć zysk"
+            if r.get("account"):
+                line += f"\n   🔄 konto „{r['account']}” w Wallet — wycena codziennie rano"
             lines.append(line)
         lines.append(f"\nRazem: *{fmt_money(total, 'PLN')}*")
         if cost_sum:
