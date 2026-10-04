@@ -66,13 +66,6 @@ payments:
     from: 2026-11-29
     debt: opona
 
-  - id: krecha
-    name: Krecha
-    amount: 964
-    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
-    rrule: FREQ=MONTHLY;COUNT=108
-    from: 2025-08-03
-
   # --- ubezpieczenia ---
   - id: ubezp-mbank
     name: Ubezpieczenie mBank
@@ -156,4 +149,5 @@ payments:
     from: 2026-01-10
 
   # Pominięte przy przenoszeniu:
-  # - "A6 spłata" (1000 zł) — spłacone 9/9 rat.
+  # - "A6 spłata" (1000 zł) — spłacone 9/9 rat; reszta A6 jako dług bez rat (/dlugi).
+  # - "Krecha" (964 zł, 108 rat) — to ten sam kredyt co Credit Agricole (kredyt-ca).

@@ -142,7 +142,7 @@ async def planned():
         assert keys["mieszkanie"] in {f"{p.id}@{d:%Y%m%d}" for p, d in core.planned.pending(today)}, "cofnięcie przywraca termin"
         print(undo.text)
 
-        print((await core.handle_callback("tg:1", f"sa:{keys['krecha']}")).text)
+        print((await core.handle_callback("tg:1", f"sa:{keys['ubezp-mbank']}")).text)
         r = await core.handle_message("tg:1", "950,50", [])
         print(r.text)
         assert core.wallet.created[-1]["amount"]["value"] == -950.5
@@ -150,7 +150,7 @@ async def planned():
         print((await core.handle_callback("tg:1", f"ss:{keys['multisport']}")).text)
         reloaded = Planned(core)  # stan z pliku
         assert reloaded.state.handled(keys["multisport"])["status"] == "skipped"
-        assert reloaded.state.handled(keys["krecha"])["status"] == "paid"
+        assert reloaded.state.handled(keys["ubezp-mbank"])["status"] == "paid"
 
     replies = await core.planned_overview()
     picker = replies[-1]
