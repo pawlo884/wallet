@@ -31,6 +31,7 @@ domeny ani HTTPS** na VPS.
 | `/wyciag <treść>` | uzgodnienie wyciągu z banku z Wallet (albo wklej / wyślij .eml) |
 | `/dlug <nazwa> <kwota>` | śledzenie długu bez stałych rat, np. `/dlug A6 9100` |
 | `/dlugi` | ile zostało do spłaty (pasek postępu), usuwanie z listy |
+| `/prognoza` | prognoza na 12 miesięcy (przepływy, długi, oszczędności, wnioski) + link do strony z wykresami |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -77,6 +78,19 @@ nie są przetwarzane.
 głosówką, albo przychodzą z wyciągu). Claude rozpoznaje spłatę, a bot przypina etykietę i od razu pokazuje,
 ile zostało. Stan = kwota początkowa − suma wydatków z tą etykietą od dnia dodania, więc działa też etykieta
 dodana ręcznie w aplikacji. Lista: `data/debts.json` na wolumenie.
+
+## Prognoza i oszczędności
+
+Prognoza liczy się na żywo z płatności cyklicznych, rat, długów i sald kont, więc zmiana planu
+(`/plan`, `config/schedule.yaml`) albo długu od razu zmienia wynik. To, czego bot nie wie
+(kwota „na życie” w trzech wariantach, cele i miesięczne wpłaty na konta **Awaryjne** i **Poduszka
+finansowa**), ustawiasz w `config/forecast.yaml`. Po pushu deploy działa sam.
+
+- `/prognoza` w bocie: skrót z najważniejszymi wnioskami.
+- Strona z wykresami i tabelą: kontener wystawia ją na porcie 8080 tylko w sieci Nginx Proxy Managera
+  (`nginx_proxy_manager_network`). W NPM dodaj Proxy Host, np. `wallet.sowa.ch → http://wallet-bot:8080`,
+  z listą dostępu `internal-panels`. Adres wpisz do `.env` jako `FORECAST_URL`, wtedy bot podaje link.
+- Wpłaty na oszczędności to przelewy: napisz „300 na awaryjne”. Bot zapisze przelew, a nie wydatek.
 
 ## Płatności cykliczne
 

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prognoza budżetu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Układ: jedna kolumna jak wyciąg z banku — podsumowanie, przepływy, tabela, długi, oszczędności, wnioski. */
+:root {
+  --bg: #f6f7f4; --paper: #ffffff; --ink: #1c2422; --muted: #5d6a66; --rule: #dfe4e0;
+  --accent: #2f6f62; --accent-soft: #d9ebe5; --neg: #b4443a; --neg-soft: #f6e1de; --warn: #a8670f; --warn-soft: #f7ead3;
+  --s1: #2f6f62; --s2: #7aa89c; --s3: #c48a3a; --free: #5b6fb0;
+  --d1: #2f6f62; --d2: #c48a3a; --d3: #8a6fb0; --d4: #c4605a; --d5: #6a8fb5; --d6: #8a9a3a;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #121715; --paper: #19201e; --ink: #e6ece9; --muted: #9aa8a3; --rule: #2b3532;
+  --accent: #6fc1ad; --accent-soft: #1f3a33; --neg: #ec8a80; --neg-soft: #3a2220; --warn: #e3ac55; --warn-soft: #3a2d17;
+  --s1: #6fc1ad; --s2: #3f7d6f; --s3: #e3ac55; --free: #93a6e6;
+  --d1: #6fc1ad; --d2: #e3ac55; --d3: #b59ad9; --d4: #ec8a80; --d5: #8fb3d9; --d6: #c3cf6f;
+  color-scheme: dark;
+} }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 64px; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.1; }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lead { color: var(--muted); }
+section { display: grid; gap: 16px; min-width: 0; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pos { color: var(--accent); } .neg { color: var(--neg); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; min-width: 0; }
+.tile .label { font-size: 13px; color: var(--muted); }
+.tile .value { font: 500 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.tile .sub { font-size: 12.5px; color: var(--muted); }
+.tile.warn { background: var(--warn-soft); border-color: transparent; } .tile.warn .value { color: var(--warn); }
+.panel { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: 18px; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend i.bar { height: 10px; width: 10px; border-radius: 2px; }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+.chart { width: 100%; height: auto; display: block; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 660px; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; }
+thead th { font: 500 11.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+tr.hot td { background: var(--warn-soft); }
+td .tag { font: 500 11px var(--body); color: var(--warn); margin-left: 6px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.card { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card h3 { margin: 0; font: 600 15px var(--body); }
+.card p { font-size: 14px; color: var(--muted); }
+.chip { justify-self: start; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 99px; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); } .chip.neg { background: var(--neg-soft); color: var(--neg); }
+.chip.ok { background: var(--accent-soft); color: var(--accent); } .chip.info { background: var(--rule); color: var(--muted); }
+.meter { height: 8px; background: var(--rule); border-radius: 99px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.foot { font-size: 13px; color: var(--muted); display: grid; gap: 6px; }
+.foot ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header style="display:grid;gap:10px">
+    <span class="eyebrow" id="eyebrow"></span>
+    <h1>Prognoza budżetu</h1>
+    <p class="lead">Liczona na żywo z płatności cyklicznych, rat i długów w bocie oraz sald kont w Wallet. Wynik pokazuje, ile pieniędzy przybędzie lub ubędzie od początku miesiąca, a nie pełne saldo konta.</p>
+  </header>
+  <section><div class="tiles" id="tiles"></div></section>
+  <section>
+    <div style="display:grid;gap:6px"><h2>Ile przybędzie na koncie</h2>
+      <p class="lead">Słupki: wynik miesiąca (wariant bazowy). Linie: suma narastająco w wariantach wydatków na życie; przerywana: co zostaje po wpłatach na oszczędności.</p></div>
+    <div class="panel" style="display:grid;gap:12px"><div class="legend" id="cashLegend"></div>
+      <svg id="cash" class="chart" viewBox="0 0 920 320" role="img" aria-label="Wynik miesięczny i suma narastająco"></svg></div>
+  </section>
+  <section><h2>Miesiąc po miesiącu</h2>
+    <div class="panel scroll"><table id="months"><thead><tr><th>Miesiąc</th><th>Przychody</th><th>Plan (z ratami)</th><th>w tym raty</th><th>Na życie</th><th>Wynik</th><th>Na oszcz.</th><th>Narastająco (baz.)</th><th>Wolne po oszcz.</th></tr></thead><tbody></tbody></table></div>
+  </section>
+  <section>
+    <div style="display:grid;gap:6px"><h2>Długi</h2><p class="lead" id="debtLead"></p></div>
+    <div class="panel" style="display:grid;gap:12px"><div class="legend" id="debtLegend"></div>
+      <svg id="debts" class="chart" viewBox="0 0 920 260" role="img" aria-label="Zadłużenie na koniec każdego miesiąca"></svg></div>
+    <div class="panel scroll"><table><thead><tr><th>Dług</th><th>Dziś</th><th id="midHead"></th><th id="endHead"></th><th>Rata</th><th>Koniec</th></tr></thead><tbody id="debtRows"></tbody></table></div>
+  </section>
+  <section id="savingsSection"><h2>Oszczędności</h2><div class="cards" id="savings"></div></section>
+  <section><h2>Co z tego wynika</h2><div class="cards" id="insights"></div></section>
+  <footer class="foot"><strong style="color:var(--ink)">Założenia</strong>
+    <ul id="assumptions"></ul></footer>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+const MIES = ["sty","lut","mar","kwi","maj","cze","lip","sie","wrz","paź","lis","gru"];
+const MIESF = ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"];
+const short = ym => { const [y, m] = ym.split("-"); return MIES[+m - 1] + (m === "01" || ym === DATA.rows[0].month ? " " + y.slice(2) : ""); };
+const longm = ym => { const [y, m] = ym.split("-"); return MIESF[+m - 1] + " " + y; };
+const zl = (v, d = 0) => (v < 0 ? "−" : "") + Math.abs(v).toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/ /g, " ");
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
+const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const R = DATA.rows, B = DATA.base, LV = DATA.living, N = R.length;
+const net = r => r["net_" + B];
+document.getElementById("eyebrow").textContent = `Stan na ${DATA.generated} · ${longm(R[0].month)} – ${longm(R[N - 1].month)}`;
+
+// Kafelki
+(() => {
+  const sorted = R.map(net).sort((a, b) => a - b), typical = sorted[Math.floor(N / 2)];
+  const worst = R.reduce((a, r) => (net(r) < net(a) ? r : a), R[0]);
+  const t = document.getElementById("tiles");
+  const add = (label, value, sub, cls = "") => t.appendChild(h("div", "tile " + cls, `<span class="label">${label}</span><span class="value num ${value.startsWith("−") ? "neg" : ""}">${value}</span><span class="sub">${sub}</span>`));
+  add("Przychody", zl(R[0].income) + " zł", "miesięcznie wg planu");
+  add("Płatności z planu", zl(R[0].planned) + " zł", `w tym raty ${zl(R[0].debt)} zł`);
+  add("Na życie (założenie)", zl(LV[B]) + " zł", `wariant ${B}`);
+  add("Typowy miesiąc", (typical > 0 ? "+" : "") + zl(typical) + " zł", "przed oszczędnościami");
+  if (net(worst) < 0) add(longm(worst.month), zl(net(worst)) + " zł", worst.yearly.map(y => esc(y.name)).join(" + ") || "najsłabszy miesiąc", "warn");
+  else add("Na koniec okresu", "+" + zl(R[N - 1]["cum_" + B]) + " zł", "narastająco");
+})();
+
+// Tabela
+(() => {
+  const tb = document.querySelector("#months tbody");
+  for (const r of R) {
+    const n = net(r), tr = h("tr", n < 0 ? "hot" : "");
+    const tag = r.yearly.length ? `<span class="tag">${r.yearly.map(y => esc(y.name)).join(", ")}</span>` : "";
+    tr.innerHTML = `<td>${longm(r.month)}${tag}</td><td class="num">${zl(r.income)}</td><td class="num">${zl(r.planned, 2)}</td>
+      <td class="num">${zl(r.debt, 2)}</td><td class="num">${zl(LV[B])}</td><td class="num ${n < 0 ? "neg" : "pos"}">${n > 0 ? "+" : ""}${zl(n, 2)}</td>
+      <td class="num">${zl(r.savings)}</td><td class="num">${zl(r["cum_" + B])}</td><td class="num ${r.cum_free < 0 ? "neg" : ""}">${zl(r.cum_free)}</td>`;
+    tb.appendChild(tr);
+  }
+})();
+
+// Wykres przepływów
+(() => {
+  const svg = document.getElementById("cash"), W = 920, H = 320, L = 64, Rr = 16, T = 16, Bt = 34;
+  const keys = Object.keys(LV), colors = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--free)"];
+  const series = keys.map(k => R.map(r => r["cum_" + k])).concat([R.map(r => r.cum_free)]);
+  const all = series.flat().concat(R.map(net), [0]);
+  const step = niceStep((Math.max(...all) - Math.min(...all)) / 5);
+  const min = Math.floor(Math.min(...all) / step) * step, max = Math.ceil(Math.max(...all) / step) * step;
+  const y = v => T + (max - v) / (max - min || 1) * (H - T - Bt);
+  const sx = (W - L - Rr) / N, x = i => L + sx * i + sx / 2;
+  for (let t = min; t <= max + 1; t += step) {
+    el("line", { x1: L, x2: W - Rr, y1: y(t), y2: y(t), stroke: "var(--rule)", "stroke-width": t === 0 ? 1.5 : 1 }, svg);
+    el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg, zl(t));
+  }
+  R.forEach((r, i) => {
+    const v = net(r);
+    el("rect", { x: x(i) - sx * 0.28, y: y(Math.max(v, 0)), width: sx * 0.56, height: Math.max(Math.abs(y(v) - y(0)), 1), rx: 3, fill: v < 0 ? "var(--neg)" : "var(--accent)", opacity: v < 0 ? 0.9 : 0.35 }, svg);
+    el("text", { x: x(i), y: H - 12, "text-anchor": "middle" }, svg, short(r.month));
+  });
+  series.forEach((s, k) => {
+    el("polyline", { points: s.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: colors[k], "stroke-width": keys[k] === B ? 3 : 2, "stroke-dasharray": k === keys.length ? "6 5" : "none", "stroke-linejoin": "round" }, svg);
+    el("circle", { cx: x(N - 1), cy: y(s[N - 1]), r: 4, fill: colors[k] }, svg);
+  });
+  const lg = document.getElementById("cashLegend");
+  lg.appendChild(h("span", "", `<i class="bar" style="background:var(--accent)"></i>wynik miesiąca`));
+  keys.forEach((k, i) => lg.appendChild(h("span", "", `<i style="background:${colors[i]}"></i>${esc(k)} · ${zl(LV[k])} zł`)));
+  lg.appendChild(h("span", "", `<i style="background:var(--free)"></i>wolne po oszczędnościach`));
+})();
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1)))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw); }
+
+// Długi
+(() => {
+  const D = DATA.debts, colors = ["var(--d1)", "var(--d2)", "var(--d3)", "var(--d4)", "var(--d5)", "var(--d6)"];
+  document.getElementById("debtLead").innerHTML = D.length
+    ? `Razem dziś <span class="num">${zl(DATA.totals.debt_now, 2)} zł</span>, na koniec okresu <span class="num">${zl(DATA.totals.debt_end, 2)} zł</span> (${zl(DATA.totals.debt_end - DATA.totals.debt_now)} zł).`
+    : "Brak śledzonych długów.";
+  const mid = Math.floor((N - 1) / 2);
+  document.getElementById("midHead").textContent = short(R[mid].month);
+  document.getElementById("endHead").textContent = short(R[N - 1].month);
+  const tb = document.getElementById("debtRows");
+  D.forEach(d => tb.appendChild(h("tr", "", `<td>${esc(d.name)}${d.rate ? ` (${(d.rate * 1200).toFixed(2).replace(".", ",")}%)` : ""}</td>
+    <td class="num">${zl(d.now, 2)}</td><td class="num">${zl(d.path[mid], 2)}</td><td class="num">${zl(d.path[N - 1], 2)}</td>
+    <td class="num">${d.planned ? zl(d.installment || 0, 2) : "brak planu"}</td><td class="num">${d.end ? d.end.split("-").reverse().join(".") : "—"}</td>`)));
+  const svg = document.getElementById("debts"), W = 920, H = 260, L = 64, Rr = 16, T = 12, Bt = 30, M = N + 1;
+  if (!D.length) { svg.remove(); return; }
+  const lg = document.getElementById("debtLegend");
+  D.forEach((d, i) => lg.appendChild(h("span", "", `<i class="bar" style="background:${colors[i % colors.length]}"></i>${esc(d.name)}`)));
+  const totals = Array.from({ length: M }, (_, i) => D.reduce((s, d) => s + (i === 0 ? d.now : d.path[i - 1]), 0));
+  const step = niceStep(Math.max(...totals) / 4), max = Math.ceil(Math.max(...totals) / step) * step;
+  const y = v => T + (max - v) / max * (H - T - Bt), x = i => L + (W - L - Rr) * i / (M - 1);
+  for (let t = 0; t <= max; t += step) { el("line", { x1: L, x2: W - Rr, y1: y(t), y2: y(t), stroke: "var(--rule)" }, svg); el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg, zl(t)); }
+  const base = Array(M).fill(0);
+  D.forEach((d, k) => {
+    const vals = [d.now].concat(d.path), top = vals.map((v, i) => base[i] + v);
+    const pts = top.map((v, i) => `${x(i)},${y(v)}`).concat(base.map((v, i) => `${x(i)},${y(v)}`).reverse());
+    el("polygon", { points: pts.join(" "), fill: colors[k % colors.length], opacity: 0.85 }, svg);
+    top.forEach((v, i) => (base[i] = v));
+  });
+  const labels = ["dziś"].concat(R.map(r => short(r.month)));
+  labels.forEach((m, i) => { if (i % 2 === 0) el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, svg, m); });
+})();
+
+// Oszczędności
+(() => {
+  const S = DATA.savings, box = document.getElementById("savings");
+  if (!S.length) { document.getElementById("savingsSection").remove(); return; }
+  S.forEach(s => {
+    const end = s.path[N - 1].balance, pct = s.target ? Math.min(100, s.balance / s.target * 100) : 0;
+    box.appendChild(h("div", "card", `<span class="chip ${s.found ? "ok" : "neg"}">${s.found ? "konto w Wallet" : "brak konta w Wallet"}</span>
+      <h3>${esc(s.name)}</h3>
+      <div class="num" style="font-size:20px">${zl(s.balance, 2)} zł <span style="color:var(--muted);font-size:14px">/ ${zl(s.target)} zł</span></div>
+      <div class="meter"><span style="width:${pct}%"></span></div>
+      <p>Wpłata ${zl(s.monthly)} zł/mies. → ${zl(end)} zł na koniec okresu${s.reach ? `, cel w ${longm(s.reach)}` : ""}.</p>`));
+  });
+})();
+
+// Wnioski
+(() => {
+  const box = document.getElementById("insights"), names = { warn: "Uwaga", neg: "Do zrobienia", ok: "Dobrze", info: "Info" };
+  DATA.insights.forEach(i => box.appendChild(h("div", "card", `<span class="chip ${i.kind}">${names[i.kind] || ""}</span><h3>${esc(i.title)}</h3><p>${esc(i.text)}</p>`)));
+  const ul = document.getElementById("assumptions");
+  [
+    `Przychody i płatności z config/schedule.yaml oraz płatności dodane w bocie (/plan); długi z /dlugi (stan z Wallet).`,
+    `„Na życie”: ${Object.entries(LV).map(([k, v]) => `${k} ${zl(v)} zł`).join(", ")} — zmień w config/forecast.yaml.`,
+    `Wpłaty na oszczędności i cele też w config/forecast.yaml; salda kont z Wallet.`,
+    `Odsetki kredytów liczone jak rata annuitetowa — bank może różnić się o kilka złotych.`,
+  ].forEach(t => ul.appendChild(h("li", "", esc(t))));
+})();
+</script>
+</body>
+</html>

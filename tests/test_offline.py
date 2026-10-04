@@ -441,3 +441,58 @@ async def debts():
 
 
 asyncio.run(debts())
+
+
+async def forecast_web_transfer():
+    """Prognoza z harmonogramu + strona WWW + przelew na konto oszczędnościowe."""
+    import datetime as dt
+    import json as js
+    import tempfile
+    from pathlib import Path
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot import forecast, web
+
+    tmp = Path(tempfile.mkdtemp())
+    os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(tmp / "s.json"),
+                      FORECAST_FILE="config/forecast.yaml")
+    ACC.append({"id": "awar", "name": "Awaryjne", "currencyCode": "PLN", "balance": {"currentBalance": 0}})
+
+    class TransferParser(FakeParser):
+        async def parse(self, text, images, today, catalog_prompt, history=None):
+            return ParseResult(amends=False, question=None, records=[
+                rec(amount=300, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
+                    note="odkładam na awaryjne", transfer_to="awar")])
+
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), TransferParser()
+    core.today = lambda: dt.date(2026, 10, 4)
+
+    f = await forecast.build(core)
+    assert len(f["rows"]) == 12 and f["rows"][0]["month"] == "2026-10"
+    jan = next(r for r in f["rows"] if r["month"] == "2027-01")
+    assert {y["name"] for y in jan["yearly"]} >= {"Kontener", "Opłata za grobek"}
+    assert jan["net_bazowy"] < 0 and any("na minusie" in i["title"] for i in f["insights"])
+    assert [s["name"] for s in f["savings"]] == ["Awaryjne", "Poduszka finansowa"] and f["savings"][0]["found"]
+    assert f["rows"][0]["savings"] == 300 and f["rows"][4]["savings"] == 800 and f["rows"][-1]["cum_free"] < f["rows"][-1]["cum_bazowy"]
+    print(forecast.summary_text(f, "https://wallet.example"))
+    js.dumps(f)
+
+    async with TestClient(TestServer(web.build_app(core))) as client:
+        page = await (await client.get("/")).text()
+        assert "const DATA = {" in page and "/*__DATA__*/" not in page
+        api = await (await client.get("/api/prognoza")).json()
+        assert api["rows"][0]["month"] == "2026-10"
+        assert (await client.get("/health")).status == 200
+
+    draft = await core.handle_message("tg:1", "300 na awaryjne", [])
+    print(draft.text)
+    assert "↔ przelew na: Awaryjne" in draft.text
+    await core.handle_callback("tg:1", draft.buttons[0][1])
+    sent = core.wallet.created[-1]
+    assert sent["transfer"] == {"pairingMode": "new", "accountId": "awar"} and "categoryId" not in sent
+    assert sent["amount"]["value"] == -300
+    ACC.pop()
+    print("\nOK forecast+web+transfer")
+
+
+asyncio.run(forecast_web_transfer())

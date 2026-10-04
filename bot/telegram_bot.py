@@ -114,6 +114,7 @@ def build(core: Core) -> Application:
 
     app.add_handler(CommandHandler("dlug", on_dlug, filters=user_filter))
     app.add_handler(CommandHandler("dlugi", cmd(core.debts_list), filters=user_filter))
+    app.add_handler(CommandHandler("prognoza", cmd(core.forecast), filters=user_filter))
 
     async def on_wyciag(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message

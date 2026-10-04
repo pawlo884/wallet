@@ -7,12 +7,18 @@ services:
     env_file: .env
     environment:
       TZ: Europe/Warsaw
-    # Bot łączy się tylko na zewnątrz (Telegram long polling, Discord gateway,
-    # Wallet API, Anthropic API) — nie potrzebuje żadnych otwartych portów.
+    # Bot łączy się na zewnątrz (Telegram, Discord, Wallet API, Anthropic API) — bez otwartych portów.
+    # Strona prognozy (port 8080 w kontenerze) jest dostępna tylko w sieci Nginx Proxy Managera:
+    # w NPM dodaj Proxy Host → wallet-bot:8080 z listą dostępu (np. internal-panels).
+    expose:
+      - "8080"
+    networks:
+      - default
+      - npm
     volumes:
-      # Płatności cykliczne (katalog, nie pojedynczy plik — wtedy kontener widzi zmiany po git pull).
+      # Płatności cykliczne i założenia prognozy (katalog — kontener widzi zmiany po git pull).
       - ./config:/app/config:ro
-      # Stan: co zapłacone / pominięte / przypomniane. Przetrwa restart i przebudowę.
+      # Stan: co zapłacone / pominięte / przypomniane, długi. Przetrwa restart i przebudowę.
       - wallet-data:/app/data
     read_only: true
     tmpfs:
@@ -26,6 +32,11 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+
+networks:
+  npm:
+    name: nginx_proxy_manager_network
+    external: true
 
 volumes:
   wallet-data:

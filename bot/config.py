@@ -38,6 +38,11 @@ class Config:
     stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL", "small"))
     stt_threads: int = field(default_factory=lambda: int(os.getenv("STT_THREADS", "4")))
 
+    # Prognoza: założenia w pliku, strona WWW na porcie (0 = wyłączona), publiczny adres do linku w /prognoza.
+    forecast_file: str = field(default_factory=lambda: os.getenv("FORECAST_FILE", "config/forecast.yaml"))
+    web_port: int = field(default_factory=lambda: int(os.getenv("WEB_PORT", "8080")))
+    forecast_url: str = field(default_factory=lambda: os.getenv("FORECAST_URL", ""))
+
     # Skrzynka bota na wyciągi (IMAP). Puste MAIL_USER = wyłączone.
     mail_imap_host: str = field(default_factory=lambda: os.getenv("MAIL_IMAP_HOST", "imap.gmail.com"))
     mail_user: str = field(default_factory=lambda: os.getenv("MAIL_USER", ""))

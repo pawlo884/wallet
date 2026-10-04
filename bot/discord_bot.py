@@ -37,6 +37,7 @@ def build(core: Core) -> discord.Client:
         "zaplanowane": core.planned_overview,
         "plany": core.plans_list,
         "dlugi": core.debts_list,
+        "prognoza": core.forecast,
         "długi": core.debts_list,
         "odswiez": core.refresh,
         "odśwież": core.refresh,

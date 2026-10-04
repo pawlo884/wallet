@@ -7,5 +7,6 @@ python-dotenv>=1.0
 pyyaml>=6.0
 python-dateutil>=2.9
 tzdata>=2024.1
+aiohttp>=3.9
 faster-whisper>=1.1
 av>=15,<19  # PyAV 19 usunął parametr metadata_errors, którego używa faster-whisper 1.2

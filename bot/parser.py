@@ -18,6 +18,11 @@ class ParsedRecord(BaseModel):
     account_id: str = Field(description="ID konta dokładnie z listy")
     date: str = Field(description="Data transakcji YYYY-MM-DD")
     counterparty: str | None = Field(description="Sklep / płatnik / odbiorca, jeśli znany")
+    transfer_to: str | None = Field(
+        default=None,
+        description="ID konta docelowego z listy KONTA, gdy to przelew między kontami użytkownika "
+        "(np. 'odłożyłem 500 na poduszkę', '300 na awaryjne'); inaczej null",
+    )
     debt_id: str | None = Field(
         default=None, description="ID długu z listy DŁUGI, jeśli ten wydatek to spłata tego długu; inaczej null"
     )
@@ -128,6 +133,10 @@ KONTA (id | nazwa | waluta):
 
 Konto domyślne: {default_account}
 
+- Przelew między WŁASNYMI kontami z listy KONTA ("odłożyłem 500 na poduszkę", "300 na awaryjne",
+  "przelałem z awaryjnego 200 na ogólne") → account_id = konto źródłowe (domyślnie konto domyślne),
+  transfer_to = konto docelowe, type = expense, category_id = dowolne z listy (zostanie pominięte).
+  To nie jest wydatek. Doładowanie konta w zewnętrznej usłudze to nadal zwykły wydatek.
 - Spłata długu z listy DŁUGI ("spłata A6 500", "oddałem tacie 200", przelew z tytułem zawierającym
   nazwę długu) → debt_id = id tego długu, type = expense. Inne wydatki → debt_id = null.
 

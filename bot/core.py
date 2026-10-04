@@ -360,6 +360,10 @@ class Core:
             d = today
         r.date = min(d, today).isoformat()
         r.amount = abs(r.amount)
+        if r.transfer_to not in self._accounts or r.transfer_to == r.account_id:
+            r.transfer_to = None
+        if r.transfer_to:
+            r.type, r.debt_id = "expense", None  # przelew wychodzi z konta źródłowego
         debt = self.debts.items.get(r.debt_id or "")
         r.debt_id = debt.id if debt and r.type == "expense" else None
         if debt and debt.category_id:
@@ -402,6 +406,9 @@ class Core:
             rec["note"] = r.note[:255]
         if r.debt_id and (debt := self.debts.items.get(r.debt_id)):
             rec["labelIds"] = [debt.label_id]
+        if r.transfer_to:  # Wallet tworzy parę rekordów (wychodzący + przychodzący) z kategorią Przelew
+            rec.pop("categoryId", None)
+            rec["transfer"] = {"pairingMode": "new", "accountId": r.transfer_to}
         return rec
 
     def _describe(self, r: ParsedRecord) -> str:
@@ -416,6 +423,8 @@ class Core:
             parts.append(f"konto {acc.get('name', '?')}")
         if r.debt_id and (debt := self.debts.items.get(r.debt_id)):
             parts.append(f"🏦 spłata: {debt.name}")
+        if r.transfer_to:
+            parts[1] = f"↔ przelew na: {self._accounts.get(r.transfer_to, {}).get('name', '?')}"
         line = "• " + " · ".join(parts)
         if r.note:
             line += f"\n   _{r.note}_"
@@ -642,6 +651,18 @@ class Core:
             f"💱 {fmt_money(amount, src)} = *{fmt_money(value, dst)}*\n"
             f"Kurs NBP {fmt_rate(ratio)} z {day:%d.%m.%Y}"
         )
+
+    async def forecast(self) -> Reply:
+        from . import forecast
+
+        try:
+            data = await forecast.build(self)
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+        except Exception as e:  # np. błąd w config/forecast.yaml
+            log.exception("Prognoza")
+            return Reply(f"⚠️ Nie udało się policzyć prognozy: {e}")
+        return Reply(forecast.summary_text(data, self.cfg.forecast_url))
 
     async def close(self) -> None:
         await self.wallet.close()

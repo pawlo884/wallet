@@ -1,0 +1,278 @@
+<title>Prognoza 2026–2027</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Układ: jedna kolumna jak wyciąg z banku — podsumowanie, wykres, tabela miesięcy, długi, co zrobić. */
+:root {
+  --bg: #f6f7f4;
+  --paper: #ffffff;
+  --ink: #1c2422;
+  --muted: #5d6a66;
+  --rule: #dfe4e0;
+  --accent: #2f6f62;      /* zielony „bankowy” — wynik dodatni, wykresy */
+  --accent-soft: #d9ebe5;
+  --neg: #b4443a;         /* minus */
+  --neg-soft: #f6e1de;
+  --warn: #a8670f;        /* styczeń, ryzyka */
+  --warn-soft: #f7ead3;
+  --s1: #2f6f62; --s2: #7aa89c; --s3: #c48a3a;
+  --d1: #2f6f62; --d2: #c48a3a; --d3: #8a6fb0; --d4: #c4605a; --d5: #6a8fb5;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --paper: #19201e; --ink: #e6ece9; --muted: #9aa8a3; --rule: #2b3532;
+  --accent: #6fc1ad; --accent-soft: #1f3a33; --neg: #ec8a80; --neg-soft: #3a2220;
+  --warn: #e3ac55; --warn-soft: #3a2d17;
+  --s1: #6fc1ad; --s2: #3f7d6f; --s3: #e3ac55;
+  --d1: #6fc1ad; --d2: #e3ac55; --d3: #b59ad9; --d4: #ec8a80; --d5: #8fb3d9;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #121715; --paper: #19201e; --ink: #e6ece9; --muted: #9aa8a3; --rule: #2b3532;
+  --accent: #6fc1ad; --accent-soft: #1f3a33; --neg: #ec8a80; --neg-soft: #3a2220;
+  --warn: #e3ac55; --warn-soft: #3a2d17;
+  --s1: #6fc1ad; --s2: #3f7d6f; --s3: #e3ac55;
+  --d1: #6fc1ad; --d2: #e3ac55; --d3: #b59ad9; --d4: #ec8a80; --d5: #8fb3d9;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 64px; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.1; }
+h2 { font-size: 22px; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lead { color: var(--muted); }
+section { display: grid; gap: 16px; min-width: 0; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pos { color: var(--accent); } .neg { color: var(--neg); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.tile { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; min-width: 0; }
+.tile .label { font-size: 13px; color: var(--muted); }
+.tile .value { font: 500 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.tile .sub { font-size: 12.5px; color: var(--muted); }
+.tile.warn { background: var(--warn-soft); border-color: transparent; }
+.tile.warn .value { color: var(--warn); }
+
+.panel { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: 18px; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend i.bar { height: 10px; width: 10px; border-radius: 2px; }
+svg text { fill: var(--muted); font: 11px var(--mono); }
+.chart { width: 100%; height: auto; display: block; }
+
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 640px; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; }
+thead th { font: 500 11.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+tr.hot td { background: var(--warn-soft); }
+td .tag { font: 500 11px var(--body); color: var(--warn); margin-left: 6px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.card { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card h3 { margin: 0; font: 600 15px var(--body); }
+.card p { font-size: 14px; color: var(--muted); }
+.card .chip { justify-self: start; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 99px; }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.neg { background: var(--neg-soft); color: var(--neg); }
+.chip.ok { background: var(--accent-soft); color: var(--accent); }
+.foot { font-size: 13px; color: var(--muted); display: grid; gap: 6px; }
+.foot ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+</style>
+
+<main class="wrap">
+  <header style="display:grid;gap:10px">
+    <span class="eyebrow">Konto „Ogólne” · stan na 04.10.2026 · prognoza 10.2026–09.2027</span>
+    <h1>Prognoza 2026–2027</h1>
+    <p class="lead">Szacunek na 12 miesięcy na podstawie płatności cyklicznych z bota, rat i długów oraz pierwszych dni października na nowym koncie. Wynik pokazuje, ile pieniędzy przybędzie lub ubędzie od dziś, a nie pełne saldo konta.</p>
+  </header>
+
+  <section>
+    <div class="tiles">
+      <div class="tile"><span class="label">Przychody</span><span class="value num">7 000 zł</span><span class="sub">2 × 3 500 zł miesięcznie</span></div>
+      <div class="tile"><span class="label">Płatności z planu</span><span class="value num">3 931 zł</span><span class="sub">w tym raty 1 004 zł; od 08.2027: 3 690 zł</span></div>
+      <div class="tile"><span class="label">Na życie (założenie)</span><span class="value num">1 400 zł</span><span class="sub">wydatki spoza planu, wariant bazowy</span></div>
+      <div class="tile"><span class="label">Zostaje miesięcznie</span><span class="value num pos">+1 670 zł</span><span class="sub">wariant bazowy, zwykły miesiąc</span></div>
+      <div class="tile warn"><span class="label">Styczeń 2027</span><span class="value num">−2 181 zł</span><span class="sub">kontener 3 500 + grób 350</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div style="display:grid;gap:6px">
+      <h2>Ile przybędzie na koncie</h2>
+      <p class="lead">Słupki: wynik miesiąca w wariancie bazowym. Linie: suma narastająco od października w trzech wariantach wydatków na życie.</p>
+    </div>
+    <div class="panel" style="display:grid;gap:12px">
+      <div class="legend">
+        <span><i class="bar" style="background:var(--accent)"></i>wynik miesiąca (bazowy)</span>
+        <span><i style="background:var(--s1)"></i>oszczędny · 900 zł</span>
+        <span><i style="background:var(--s2)"></i>bazowy · 1 400 zł</span>
+        <span><i style="background:var(--s3)"></i>luźny · 2 000 zł</span>
+      </div>
+      <svg id="cash" class="chart" viewBox="0 0 920 320" role="img" aria-label="Wynik miesięczny i suma narastająco"></svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>Miesiąc po miesiącu</h2>
+    <div class="panel scroll">
+      <table id="months">
+        <thead><tr><th>Miesiąc</th><th>Przychody</th><th>Plan (z ratami)</th><th>w tym raty</th><th>Na życie</th><th>Wynik</th><th>Narastająco<br>oszcz. / baz. / luźny</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div style="display:grid;gap:6px">
+      <h2>Długi</h2>
+      <p class="lead">Razem dziś <span class="num">65 933,78 zł</span>, za 12 miesięcy <span class="num">59 497,89 zł</span> (−6 436 zł). Bez planu spłaty A6 stoi w miejscu.</p>
+    </div>
+    <div class="panel" style="display:grid;gap:12px">
+      <div class="legend" id="debtLegend"></div>
+      <svg id="debts" class="chart" viewBox="0 0 920 260" role="img" aria-label="Zadłużenie na koniec każdego miesiąca"></svg>
+    </div>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th>Dług</th><th>Dziś</th><th>03.2027</th><th>09.2027</th><th>Rata</th><th>Koniec</th></tr></thead>
+        <tbody>
+          <tr><td>Credit Agricole (8,40%)</td><td class="num">55 100,98</td><td class="num">52 798,64</td><td class="num">50 397,89</td><td class="num">762,77</td><td class="num">02.2035</td></tr>
+          <tr><td>A6</td><td class="num">9 100,00</td><td class="num">9 100,00</td><td class="num">9 100,00</td><td>brak planu</td><td>—</td></tr>
+          <tr><td>Opony (0%)</td><td class="num">882,00</td><td class="num">0,00</td><td class="num">0,00</td><td class="num">147,00</td><td class="num">03.2027</td></tr>
+          <tr><td>Opona (0%)</td><td class="num">639,75</td><td class="num">284,25</td><td class="num">0,00</td><td class="num">71,10</td><td class="num">07.2027</td></tr>
+          <tr><td>Ssd (0%)</td><td class="num">211,05</td><td class="num">70,35</td><td class="num">0,00</td><td class="num">23,45</td><td class="num">06.2027</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lead">Odsetki w Credit Agricole przez najbliższe 12 miesięcy to ok. <span class="num">4 450 zł</span>. Po spłacie trzech małych kredytów (lipiec 2027) zwalnia się <span class="num">241,55 zł</span> miesięcznie.</p>
+  </section>
+
+  <section>
+    <h2>Co z tego wynika</h2>
+    <div class="cards">
+      <div class="card"><span class="chip warn">Styczeń</span><h3>Odkładaj na styczeń od teraz</h3>
+        <p>W grudniu płacisz ubezpieczenie A6 (1 400 zł), a w styczniu kontener (3 500 zł) i grób (350 zł). Razem 5 250 zł, czyli ok. 1 750 zł miesięcznie od października: prawie cała nadwyżka. Nie ruszaj jej do stycznia. W wariancie luźnym w styczniu jesteś na minusie (−976 zł).</p></div>
+      <div class="card"><span class="chip neg">Dubel</span><h3>Jedzenie liczy się podwójnie</h3>
+        <p>W planie jest „Jedzenie” 1 150 zł, a zakupy w Lidlu i Biedronce wpisujesz osobno. Wybierz jedno: albo zostaw 1 150 zł jako przelew na jedzenie i nie wpisuj zakupów, albo usuń „Jedzenie” z planu i wpisuj każde zakupy (lepiej widać, gdzie idą pieniądze).</p></div>
+      <div class="card"><span class="chip neg">Dubel</span><h3>Cursor: zapisany 2.10, w planie 28.10</h3>
+        <p>Cursor IDE 102,88 zł jest już w październiku. Gdy 28.10 przyjdzie przypomnienie „Cursor abonament”, kliknij ⏭ Pomiń. Najlepiej zmień w planie dzień na 2. i kwotę na ok. 103 zł.</p></div>
+      <div class="card"><span class="chip warn">Poza planem</span><h3>Koszty, których nie ma w planie</h3>
+        <p>OVH 347,29 zł, internet Korbank 50 zł i Anthropic ok. 77 zł wyglądają na comiesięczne. To ok. 475 zł miesięcznie, które teraz siedzą w „na życie”. Dodaj je przez <span class="num">/plan</span>, a prognoza będzie dokładniejsza.</p></div>
+      <div class="card"><span class="chip ok">A6</span><h3>Plan dla A6: 500 zł od lutego</h3>
+        <p>Po styczniu zostaje ok. 1 670 zł miesięcznie. Przy 500 zł miesięcznie od lutego 2027 A6 będzie spłacone w sierpniu 2028 (ostatnia wpłata 100 zł), a we wrześniu 2027 i tak masz ok. 11 900 zł nadwyżki narastająco.</p></div>
+      <div class="card"><span class="chip ok">Później</span><h3>Nadpłata Credit Agricole</h3>
+        <p>Kredyt kosztuje 8,40% rocznie. Każdy 1 000 zł nadpłaty dziś to ok. 1 000 zł mniej odsetek do końca kredytu. Sensowne po zbudowaniu poduszki i spłacie A6.</p></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <strong style="color:var(--ink)">Założenia</strong>
+    <ul>
+      <li>Przychody stałe 7 000 zł (październikowa „Wypłata konto” wyniosła 3 611,85 zł, więc realnie może być trochę więcej).</li>
+      <li>„Na życie” to wszystko spoza planu: zakupy poza limitem jedzenia, paliwo, dzieci, serwery, prezenty. Pierwsze 4 dni października dały 865 zł, ale w tym jednorazowe judo i breloczki. Warianty 900 / 1 400 / 2 000 zł to widełki do sprawdzenia po pierwszym pełnym miesiącu.</li>
+      <li>Płatności, raty i długi wg bota na 04.10.2026. Odsetki Credit Agricole liczone jak w banku (rata annuitetowa, 0,7% miesięcznie), może się różnić o kilka złotych.</li>
+      <li>Stare konto (archiwum) pominięte.</li>
+    </ul>
+  </footer>
+</main>
+
+<script>
+const ROWS = [
+  ["2026-10",7000,3931.53,1004.47,1668.47,2168.47,1668.47,1068.47],
+  ["2026-11",7000,3931.38,1004.32,1668.62,4337.09,3337.09,2137.09],
+  ["2026-12",7000,5331.38,1004.32,268.62,5105.71,3605.71,1805.71],
+  ["2027-01",7000,7781.38,1004.32,-2181.38,3424.33,1424.33,-975.67],
+  ["2027-02",7000,3931.38,1004.32,1668.62,5592.95,3092.95,92.95],
+  ["2027-03",7000,3931.38,1004.32,1668.62,7761.57,4761.57,1161.57],
+  ["2027-04",7000,3784.38,857.32,1815.62,10077.19,6577.19,2377.19],
+  ["2027-05",7000,3784.38,857.32,1815.62,12392.81,8392.81,3592.81],
+  ["2027-06",7000,3784.38,857.32,1815.62,14708.43,10208.43,4808.43],
+  ["2027-07",7000,3760.93,833.87,1839.07,17047.5,12047.5,6047.5],
+  ["2027-08",7000,3689.83,762.77,1910.17,19457.67,13957.67,7357.67],
+  ["2027-09",7000,3689.83,762.77,1910.17,21867.84,15867.84,8667.84],
+];
+const DEBTS = {
+  "Credit Agricole": [55100.98,54723.92,54344.21,53961.85,53576.82,53189.08,52798.64,52405.46,52009.53,51610.82,51209.33,50805.02,50397.89],
+  "A6": Array(13).fill(9100),
+  "Opony": [882,735,588,441,294,147,0,0,0,0,0,0,0],
+  "Opona": [639.75,639.75,568.65,497.55,426.45,355.35,284.25,213.15,142.05,70.95,0,0,0],
+  "Ssd": [211.05,187.6,164.15,140.7,117.25,93.8,70.35,46.9,23.45,0,0,0,0],
+};
+const MIES = ["sty","lut","mar","kwi","maj","cze","lip","sie","wrz","paź","lis","gru"];
+const label = ym => { const [y, m] = ym.split("-"); return MIES[+m - 1] + (m === "01" || m === "10" ? " " + y.slice(2) : ""); };
+const zl = (v, d = 0) => (v < 0 ? "−" : "") + Math.abs(v).toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/ /g, " ");
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
+
+// Tabela miesięcy
+const tb = document.querySelector("#months tbody");
+for (const [m, inc, plan, debt, net, c1, c2, c3] of ROWS) {
+  const tr = document.createElement("tr");
+  if (net < 0) tr.className = "hot";
+  const note = m === "2026-12" ? '<span class="tag">ubezp. A6</span>' : m === "2027-01" ? '<span class="tag">kontener + grób</span>' : "";
+  tr.innerHTML = `<td>${label(m).replace(/ \d+$/, "")} ${m.slice(0, 4)}${note}</td>
+    <td class="num">${zl(inc)}</td><td class="num">${zl(plan, 2)}</td><td class="num">${zl(debt, 2)}</td>
+    <td class="num">1 400</td><td class="num ${net < 0 ? "neg" : "pos"}">${net > 0 ? "+" : ""}${zl(net, 2)}</td>
+    <td class="num">${zl(c1)} / <strong>${zl(c2)}</strong> / <span class="${c3 < 0 ? "neg" : ""}">${zl(c3)}</span></td>`;
+  tb.appendChild(tr);
+}
+
+// Wykres przepływów
+(function () {
+  const svg = document.getElementById("cash");
+  const W = 920, H = 320, L = 64, R = 16, T = 16, B = 34;
+  const min = -3000, max = 22000, ticks = [-2000, 0, 5000, 10000, 15000, 20000];
+  const y = v => T + (max - v) / (max - min) * (H - T - B);
+  const step = (W - L - R) / ROWS.length, x = i => L + step * i + step / 2;
+  for (const t of ticks) {
+    el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "var(--rule)", "stroke-width": t === 0 ? 1.5 : 1 }, svg);
+    el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg, zl(t));
+  }
+  ROWS.forEach((r, i) => {
+    const v = r[4], top = y(Math.max(v, 0)), h = Math.abs(y(v) - y(0));
+    el("rect", { x: x(i) - step * 0.28, y: top, width: step * 0.56, height: Math.max(h, 1), rx: 3,
+      fill: v < 0 ? "var(--neg)" : "var(--accent)", opacity: v < 0 ? 0.9 : 0.35 }, svg);
+    el("text", { x: x(i), y: H - 12, "text-anchor": "middle" }, svg, label(r[0]));
+  });
+  [[5, "var(--s1)"], [6, "var(--s2)"], [7, "var(--s3)"]].forEach(([col, color]) => {
+    const pts = ROWS.map((r, i) => `${x(i)},${y(r[col])}`).join(" ");
+    el("polyline", { points: pts, fill: "none", stroke: color, "stroke-width": col === 6 ? 3 : 2, "stroke-linejoin": "round" }, svg);
+    const last = ROWS[ROWS.length - 1];
+    el("circle", { cx: x(ROWS.length - 1), cy: y(last[col]), r: 4, fill: color }, svg);
+  });
+  const jan = 3;
+  el("text", { x: x(jan), y: y(ROWS[jan][4]) + 16, "text-anchor": "middle", style: "fill:var(--neg)" }, svg, zl(ROWS[jan][4]));
+})();
+
+// Wykres długów (warstwy)
+(function () {
+  const svg = document.getElementById("debts");
+  const names = Object.keys(DEBTS), colors = ["var(--d1)", "var(--d2)", "var(--d3)", "var(--d4)", "var(--d5)"];
+  const lg = document.getElementById("debtLegend");
+  names.forEach((n, i) => { const s = document.createElement("span"); s.innerHTML = `<i class="bar" style="background:${colors[i]}"></i>${n}`; lg.appendChild(s); });
+  const W = 920, H = 260, L = 64, R = 16, T = 12, B = 30, N = 13;
+  const max = 70000, ticks = [0, 20000, 40000, 60000];
+  const y = v => T + (max - v) / max * (H - T - B);
+  const x = i => L + (W - L - R) * i / (N - 1);
+  for (const t of ticks) {
+    el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "var(--rule)" }, svg);
+    el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg, zl(t));
+  }
+  const base = Array(N).fill(0);
+  names.forEach((n, k) => {
+    const top = DEBTS[n].map((v, i) => base[i] + v);
+    const pts = top.map((v, i) => `${x(i)},${y(v)}`).concat(base.map((v, i) => `${x(i)},${y(v)}`).reverse());
+    el("polygon", { points: pts.join(" "), fill: colors[k], opacity: 0.85 }, svg);
+    top.forEach((v, i) => (base[i] = v));
+  });
+  const months = ["paź 26","lis","gru","sty 27","lut","mar","kwi","maj","cze","lip","sie","wrz","paź"];
+  months.forEach((m, i) => { if (i % 2 === 0) el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, svg, m); });
+  el("text", { x: x(0) + 6, y: y(base[0]) - 6 }, svg, zl(base[0]) + " zł");
+  el("text", { x: x(N - 1) - 6, y: y(base[N - 1]) - 6, "text-anchor": "end" }, svg, zl(base[N - 1]) + " zł");
+})();
+</script>
