@@ -109,6 +109,12 @@ def build(core: Core) -> Application:
 
     app.add_handler(CommandHandler("kurs", on_kurs, filters=user_filter))
 
+    async def on_dlug(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await send(update, await core.debt_add(" ".join(ctx.args or [])))
+
+    app.add_handler(CommandHandler("dlug", on_dlug, filters=user_filter))
+    app.add_handler(CommandHandler("dlugi", cmd(core.debts_list), filters=user_filter))
+
     async def on_wyciag(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
         await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
@@ -158,7 +164,7 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly):"))
     return app
 
 

@@ -29,6 +29,8 @@ domeny ani HTTPS** na VPS.
 | `/plany` | wszystkie płatności cykliczne z przyciskami 🗑 do usuwania |
 | `/kurs [kwota] [waluta] [na]` | kursy NBP; np. `/kurs`, `/kurs 100 eur`, `/kurs 50 usd eur` |
 | `/wyciag <treść>` | uzgodnienie wyciągu z banku z Wallet (albo wklej / wyślij .eml) |
+| `/dlug <nazwa> <kwota>` | śledzenie długu bez stałych rat, np. `/dlug A6 9100` |
+| `/dlugi` | ile zostało do spłaty (pasek postępu), usuwanie z listy |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -68,6 +70,13 @@ Jak podać wyciąg:
 Konfiguracja skrzynki (`.env`): `MAIL_USER`, `MAIL_PASSWORD` (hasło aplikacji), `MAIL_ALLOWED_FROM`.
 Maile od innych nadawców są tylko pokazywane w bocie (np. kod weryfikacyjny przekierowania z Gmaila),
 nie są przetwarzane.
+
+## Długi bez stałych rat
+
+`/dlug A6 9100` zakłada dług i etykietę „Dług: A6” w Wallet. Spłaty wpisujesz normalnie („spłata A6 500”,
+głosówką, albo przychodzą z wyciągu). Claude rozpoznaje spłatę, a bot przypina etykietę i od razu pokazuje,
+ile zostało. Stan = kwota początkowa − suma wydatków z tą etykietą od dnia dodania, więc działa też etykieta
+dodana ręcznie w aplikacji. Lista: `data/debts.json` na wolumenie.
 
 ## Płatności cykliczne
 

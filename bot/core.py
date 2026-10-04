@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
+from .debts import Debts, parse_debt_command
 from .fx import FX, FXError, resolve_code
 from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
@@ -72,6 +73,7 @@ class Core:
         self.fx = FX()
         self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
         self.reconciler = Reconciler(self)
+        self.debts = Debts(self)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
@@ -95,6 +97,7 @@ class Core:
                     f"{a['id']} | {a['name']} | {a.get('currencyCode', '')}" for a in accounts
                 ),
                 default_account=self._default_account_id,
+                debts=self.debts.prompt_block(),
                 categories="\n".join(
                     f"{c['id']} | {c['name']} | {c.get('parentName') or (c.get('group') or {}).get('name', '')}"
                     for c in sorted(self._categories.values(), key=lambda c: c["name"])
@@ -262,6 +265,18 @@ class Core:
         action, _, key = data.partition(":")
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
+        if action == "dl":
+            debt = self.debts.items.get(key)
+            if not debt:
+                return Reply("Tego długu już nie śledzę.")
+            return Reply(
+                f"Przestać śledzić *{debt.name}*? (wpisy i etykieta w Wallet zostają)",
+                [("🗑 Tak", f"dly:{key}"), ("Zostaw", "keep:")],
+            )
+        if action == "dly":
+            debt = self.debts.remove(key)
+            self._catalog_at = 0.0
+            return Reply(f"🗑 Nie śledzę już: {debt.name}" if debt else "Tego długu już nie śledzę.")
         if action in ("pa", "pn", "rm", "rmy", "keep"):
             return await self._plan_callback(owner, action, key)
         if action in ("ok", "no"):
@@ -322,6 +337,13 @@ class Core:
             if not occ_key:  # poprawki „zmień na…” dotyczą zwykłych wpisów, nie płatności cyklicznych
                 self._last_saved[owner] = key
             buttons.append(("↩️ Cofnij", f"undo:{key}"))
+            # Po spłacie długu — od razu ile zostało.
+            for did in dict.fromkeys(r.debt_id for r in records if r.debt_id):
+                if debt := self.debts.items.get(did):
+                    try:
+                        lines.append(await self.debts.status_line(debt))
+                    except WalletError as e:
+                        log.warning("Stan długu %s: %s", did, e)
         return Reply("\n".join(lines) or "⚠️ Nic nie zapisano.", buttons)
 
     # ---------- konwersje ----------
@@ -338,6 +360,10 @@ class Core:
             d = today
         r.date = min(d, today).isoformat()
         r.amount = abs(r.amount)
+        debt = self.debts.items.get(r.debt_id or "")
+        r.debt_id = debt.id if debt and r.type == "expense" else None
+        if debt and debt.category_id:
+            r.category_id = debt.category_id
         return r
 
     @staticmethod
@@ -374,6 +400,8 @@ class Core:
             rec["counterParty"] = r.counterparty[:255]
         if r.note:
             rec["note"] = r.note[:255]
+        if r.debt_id and (debt := self.debts.items.get(r.debt_id)):
+            rec["labelIds"] = [debt.label_id]
         return rec
 
     def _describe(self, r: ParsedRecord) -> str:
@@ -386,6 +414,8 @@ class Core:
         parts.append(date.fromisoformat(r.date).strftime("%d.%m"))
         if r.account_id != self._default_account_id:
             parts.append(f"konto {acc.get('name', '?')}")
+        if r.debt_id and (debt := self.debts.items.get(r.debt_id)):
+            parts.append(f"🏦 spłata: {debt.name}")
         line = "• " + " · ".join(parts)
         if r.note:
             line += f"\n   _{r.note}_"
@@ -510,6 +540,43 @@ class Core:
         lines.append("\nDodaj: `/plan netflix 49 co miesiąc 15-go`. Usuń: przycisk poniżej.")
         return Reply("\n".join(lines), [(f"🗑 {p.name}", f"rm:{p.id}") for p in payments[:25]], column=True)
 
+    # ---------- długi (/dlug, /dlugi) ----------
+
+    async def debt_add(self, text: str) -> Reply:
+        parsed = parse_debt_command(text)
+        if not parsed:
+            return Reply(
+                "🏦 Dodaj dług: `/dlug <nazwa> <ile zostało>`, np. `/dlug A6 9100` albo `/dlug pożyczka od taty 2000`.\n"
+                "Spłaty wpisuj normalnie: „spłata A6 500” — sam odejmę od długu."
+            )
+        name, total = parsed
+        try:
+            await self.refresh_catalog()
+            # Kategoria ze starych wpisów o tej nazwie nie jest znana — Leasing dla aut, inaczej Loan.
+            cat = "5c5c1f46-0032-8000-8000-000000000000" if re.search(r"\b(a\d|auto|samoch)", name.lower()) else None
+            debt = await self.debts.add(name, total, cat if cat in self._categories else None)
+            self._catalog_at = 0.0  # prompt dostanie nową listę długów
+            return Reply(
+                f"✅ Dodano dług *{debt.name}*: {fmt_money(debt.total, self.cfg.base_currency)}.\n"
+                f"W Wallet utworzyłem etykietę „Dług: {debt.name}”.\n"
+                f"Spłaty wpisuj np. „spłata {debt.name} 500” — pokażę, ile zostało. Podgląd: `/dlugi`."
+            )
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+
+    async def debts_list(self) -> Reply:
+        if not self.debts.items:
+            return await self.debt_add("")
+        try:
+            lines = [await self.debts.status_line(d) for d in self.debts.items.values()]
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+        return Reply(
+            "\n\n".join(lines) + "\n\nNowy: `/dlug <nazwa> <kwota>`",
+            [(f"🗑 Przestań śledzić: {d.name}", f"dl:{d.id}") for d in self.debts.items.values()],
+            column=True,
+        )
+
     async def _plan_callback(self, owner: str, action: str, key: str) -> Reply:
         if action in ("pa", "pn"):
             draft = self._plan_drafts.pop(key, None)
@@ -594,10 +661,11 @@ Pamiętam ostatnie ~30 min rozmowy, więc możesz poprawiać:
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
+Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
-Komendy: saldo · miesiac · zaplanowane · plan · plany · kurs · wyciag · odswiez · pomoc"""
+Komendy: saldo · miesiac · zaplanowane · plan · plany · dlug · dlugi · kurs · wyciag · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

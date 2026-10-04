@@ -18,6 +18,9 @@ class ParsedRecord(BaseModel):
     account_id: str = Field(description="ID konta dokładnie z listy")
     date: str = Field(description="Data transakcji YYYY-MM-DD")
     counterparty: str | None = Field(description="Sklep / płatnik / odbiorca, jeśli znany")
+    debt_id: str | None = Field(
+        default=None, description="ID długu z listy DŁUGI, jeśli ten wydatek to spłata tego długu; inaczej null"
+    )
     note: str = Field(
         description="ZAWSZE: krótki opis po polsku, na co konkretnie poszły pieniądze "
         "(np. 'doładowanie API Anthropic', 'kawa i ciastko', 'mleko, chleb, karma dla psa')"
@@ -124,6 +127,12 @@ KONTA (id | nazwa | waluta):
 {accounts}
 
 Konto domyślne: {default_account}
+
+- Spłata długu z listy DŁUGI ("spłata A6 500", "oddałem tacie 200", przelew z tytułem zawierającym
+  nazwę długu) → debt_id = id tego długu, type = expense. Inne wydatki → debt_id = null.
+
+DŁUGI (id | nazwa):
+{debts}
 
 KATEGORIE (id | nazwa | kategoria nadrzędna):
 {categories}

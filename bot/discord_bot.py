@@ -36,6 +36,8 @@ def build(core: Core) -> discord.Client:
         "miesiąc": core.month_summary,
         "zaplanowane": core.planned_overview,
         "plany": core.plans_list,
+        "dlugi": core.debts_list,
+        "długi": core.debts_list,
         "odswiez": core.refresh,
         "odśwież": core.refresh,
     }
@@ -98,6 +100,9 @@ def build(core: Core) -> discord.Client:
             async with message.channel.typing():
                 replies = await core.statement_file(f"dc:{message.author.id}", await doc.read())
             await send(message.channel, replies, reference=message)
+            return
+        if command in ("dlug", "dług"):
+            await send(message.channel, await core.debt_add(args), reference=message)
             return
         if command == "kurs":
             await send(message.channel, await core.fx_quote(args), reference=message)

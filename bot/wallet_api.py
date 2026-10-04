@@ -69,6 +69,15 @@ class WalletAPI:
         params = {"recordDate": [f"gte.{date_from}", f"lt.{date_to}"], **filters}
         return await self._paged("/v1/api/records", "records", params)
 
+    async def labels(self) -> list[dict]:
+        return await self._paged("/v1/api/labels", "labels", {"archived": "false"})
+
+    async def create_label(self, name: str, color: str = "Orange") -> dict:
+        data = await self._request("POST", "/v1/api/labels", json={"name": name[:80], "color": color})
+        if not data.get("label"):
+            raise WalletError(f"Nie udało się utworzyć etykiety: {data}")
+        return data["label"]
+
     async def create_records(self, records: list[dict]) -> list[dict]:
         """Zwraca listę wyników (inputIndex, success, id, error) — po jednym na rekord."""
         data = await self._request(

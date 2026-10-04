@@ -352,3 +352,55 @@ async def statements():
 
 
 asyncio.run(statements())
+
+
+async def debts():
+    """Dług bez stałych rat: /dlug, spłata z etykietą, ile zostało, /dlugi."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+
+    os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"))
+
+    class DebtWallet(FakeWallet):
+        def __init__(self):
+            super().__init__()
+            self.label_records = []
+        async def labels(self): return []
+        async def create_label(self, name, color="Orange"): return {"id": "lbl-a6", "name": name}
+        async def create_records(self, recs):
+            self.label_records += [r for r in recs if r.get("labelIds") == ["lbl-a6"]]
+            return await super().create_records(recs)
+        async def records(self, *a, **k):
+            if k.get("labelId") == "lbl-a6":
+                return [{"amount": r["amount"]} for r in self.label_records]
+            return await super().records(*a, **k)
+
+    class DebtParser(FakeParser):
+        async def parse(self, text, images, today, catalog_prompt, history=None):
+            assert "a6 | A6" in catalog_prompt, "prompt zna długi"
+            return ParseResult(amends=False, question=None, records=[
+                rec(amount=500, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
+                    note="spłata A6", debt_id="a6")])
+
+    core = Core(Config())
+    core.wallet, core.parser = DebtWallet(), DebtParser()
+    core.today = lambda: dt.date(2026, 10, 4)
+
+    print((await core.debt_add("A6 9 100")).text)
+    assert core.debts.items["a6"].total == 9100 and core.debts.items["a6"].label_id == "lbl-a6"
+    draft = await core.handle_message("tg:1", "spłata A6 500", [])
+    print(draft.text)
+    assert "🏦 spłata: A6" in draft.text
+    saved = await core.handle_callback("tg:1", draft.buttons[0][1])
+    print(saved.text)
+    assert core.wallet.created[-1]["labelIds"] == ["lbl-a6"] and "zostało *8 600,00 PLN*" in saved.text
+    lst = await core.debts_list()
+    print(lst.text)
+    assert lst.buttons == [("🗑 Przestań śledzić: A6", "dl:a6")]
+    print((await core.handle_callback("tg:1", "dly:a6")).text)
+    assert not core.debts.items
+    print("\nOK debts")
+
+
+asyncio.run(debts())
