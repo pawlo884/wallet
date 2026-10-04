@@ -94,6 +94,11 @@ td .tag { font: 500 11px var(--body); color: var(--warn); margin-left: 6px; }
     <div class="panel scroll"><table><thead><tr><th>Dług</th><th>Dziś</th><th id="midHead"></th><th id="endHead"></th><th>Rata</th><th>Koniec</th></tr></thead><tbody id="debtRows"></tbody></table></div>
   </section>
   <section id="savingsSection"><h2>Oszczędności</h2><div class="cards" id="savings"></div></section>
+  <section id="msSection" hidden>
+    <div style="display:grid;gap:6px"><h2 id="msTitle">Multisport</h2><p class="lead" id="msLead"></p></div>
+    <div class="panel" style="display:grid;gap:12px"><div class="legend" id="msLegend"></div>
+      <svg id="ms" class="chart" viewBox="0 0 920 220" role="img" aria-label="Wejścia na kartę Multisport w kolejnych miesiącach"></svg></div>
+  </section>
   <section><h2>Co z tego wynika</h2><div class="cards" id="insights"></div></section>
   <footer class="foot"><strong style="color:var(--ink)">Założenia</strong>
     <ul id="assumptions"></ul></footer>
@@ -235,6 +240,39 @@ function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(r
       <div class="num" style="font-size:20px">${i.value != null ? zl(i.value, 2) + " zł" : esc(i.error || "brak ceny")}</div>
       ${i.unit_pln ? `<p>${zl(i.unit_pln, 2)} zł / ${esc(i.unit)}</p>` : ""}${gain}`);
   }
+})();
+
+// Multisport: wejścia/miesiąc vs próg opłacalności
+(() => {
+  const M = DATA.multisport;
+  if (!M) return;
+  document.getElementById("msSection").hidden = false;
+  document.getElementById("msTitle").textContent = M.name || "Multisport";
+  const lead = document.getElementById("msLead"), svg = document.getElementById("ms");
+  const head = `${zl(M.fee, 2)} zł/mies. · wejście bez karty ~${zl(M.ticket)} zł · opłaca się od <strong>${M.breakeven} wejść</strong> w miesiącu.`;
+  if (M.status !== "ok") {
+    lead.innerHTML = head + (M.status === "error" ? ` Strava: ${esc(M.error || "błąd")}.` : " Połącz Stravę w bocie komendą /strava, żeby zobaczyć wejścia.");
+    svg.parentElement.remove(); return;
+  }
+  lead.innerHTML = head + (M.avg_visits != null
+    ? ` Średnio <span class="num">${String(M.avg_visits).replace(".", ",")}</span> wejść → <span class="num">${zl(M.avg_per_visit, 2)} zł</span> za wejście: <span class="${M.worth_it ? "pos" : "neg"}">${M.worth_it ? "opłaca się" : "nie opłaca się"}</span> (bilans vs bilety ${M.avg_saving > 0 ? "+" : ""}${zl(M.avg_saving)} zł/mies.).`
+    : "");
+  const rows = M.rows, n = rows.length, W = 920, H = 220, L = 40, Rr = 16, T = 16, Bt = 34;
+  const max = Math.max(M.breakeven + 2, ...rows.map(r => r.visits));
+  const y = v => T + (max - v) / max * (H - T - Bt), sx = (W - L - Rr) / n, x = i => L + sx * i + sx / 2;
+  for (let t = 0; t <= max; t += Math.max(1, Math.ceil(max / 5))) { el("line", { x1: L, x2: W - Rr, y1: y(t), y2: y(t), stroke: "var(--rule)" }, svg); el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg, t); }
+  rows.forEach((r, i) => {
+    const ok = r.visits >= M.breakeven;
+    el("rect", { x: x(i) - sx * 0.3, y: y(r.visits), width: sx * 0.6, height: Math.max(y(0) - y(r.visits), 1), rx: 3,
+      fill: ok ? "var(--accent)" : "var(--warn)", opacity: r.partial ? 0.45 : 0.9 }, svg);
+    el("text", { x: x(i), y: y(r.visits) - 6, "text-anchor": "middle" }, svg, r.per_visit ? `${zl(r.per_visit)} zł/wej.` : "—");
+    el("text", { x: x(i), y: H - 12, "text-anchor": "middle" }, svg, short(r.month) + (r.partial ? " …" : ""));
+  });
+  el("line", { x1: L, x2: W - Rr, y1: y(M.breakeven), y2: y(M.breakeven), stroke: "var(--neg)", "stroke-dasharray": "6 5", "stroke-width": 1.5 }, svg);
+  el("text", { x: W - Rr, y: y(M.breakeven) - 6, "text-anchor": "end", style: "fill:var(--neg)" }, svg, `próg ${M.breakeven}`);
+  const lg = document.getElementById("msLegend");
+  [["var(--accent)", "wejścia — opłaca się"], ["var(--warn)", "wejścia — poniżej progu"]].forEach(([c, t]) => lg.appendChild(h("span", "", `<i class="bar" style="background:${c}"></i>${t}`)));
+  lg.appendChild(h("span", "", `<i style="background:var(--neg)"></i>próg opłacalności`));
 })();
 
 // Wnioski

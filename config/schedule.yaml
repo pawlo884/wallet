@@ -90,7 +90,7 @@ payments:
 
   # --- abonamenty ---
   - id: multisport
-    name: Multi Sport Magda
+    name: Multisport
     amount: 232.09
     category_id: 5c5c1772-003c-8000-8000-000000000000 # Active sport, fitness
     rrule: FREQ=MONTHLY

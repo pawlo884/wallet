@@ -13,6 +13,7 @@ from .config import Config
 from .debts import Debts, parse_debt_command
 from .fx import FX, FXError, resolve_code
 from .investments import Holding, Investments
+from .strava import Strava, StravaError
 from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
@@ -78,6 +79,7 @@ class Core:
         self.reconciler = Reconciler(self)
         self.debts = Debts(self)
         self.investments = Investments(self)
+        self.strava = Strava(self)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
@@ -732,6 +734,41 @@ class Core:
         self.investments.remove(key)
         return Reply(f"🗑 Usunięto: {h.name}")
 
+    # ---------- Strava i Multisport (/strava, /multisport) ----------
+
+    async def strava_connect(self, text: str) -> Reply:
+        s = self.strava
+        if not s.configured:
+            return Reply(
+                "🔗 *Strava — konfiguracja (jednorazowo):*\n"
+                "1. https://www.strava.com/settings/api → utwórz aplikację, *Authorization Callback Domain*: `localhost`.\n"
+                "2. Do `.env` na serwerze dopisz `STRAVA_CLIENT_ID` i `STRAVA_CLIENT_SECRET`, potem `docker compose up -d`.\n"
+                "3. Wróć tutaj i napisz /strava."
+            )
+        if text.strip():
+            try:
+                who = await s.exchange(text)
+            except StravaError as e:
+                return Reply(f"⚠️ {e}")
+            return Reply(f"✅ Strava połączona{': ' + who if who else ''}. Sprawdź: /multisport")
+        status = f"Połączona: {s.tokens.get('athlete') or 'tak'}. Żeby połączyć ponownie:\n" if s.connected else ""
+        return Reply(
+            f"🔗 {status}1. Otwórz link i kliknij *Authorize* (zostaw zgodę na odczyt aktywności):\n{s.auth_url()}\n\n"
+            "2. Przeglądarka przejdzie na adres `http://localhost/exchange_token?...` — strona się nie otworzy, to normalne.\n"
+            "3. Skopiuj *cały adres* z paska i wyślij: `/strava <adres>`"
+        )
+
+    async def multisport_report(self) -> Reply:
+        from . import multisport
+
+        try:
+            return Reply(multisport.text(await multisport.analyze(self)))
+        except StravaError as e:
+            return Reply(f"⚠️ {e}")
+        except Exception as e:
+            log.exception("Multisport")
+            return Reply(f"⚠️ Nie udało się pobrać aktywności: {e}")
+
     # ---------- korekta salda (/korekta) ----------
 
     async def balance_fix(self, owner: str, text: str) -> Reply:
@@ -809,6 +846,7 @@ class Core:
         await self.wallet.close()
         await self.fx.close()
         await self.investments.close()
+        await self.strava.close()
 
 
 HELP = """👋 Zapisuję wydatki i przychody do Wallet.
@@ -828,13 +866,14 @@ Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
 Inwestycje: `/inwestycja srebro 2 uncje` · wycena: `/inwestycje`
+Multisport: opłacalność ze Stravy — `/multisport` (połączenie: `/strava`)
 Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
 Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
 
-Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · kurs · wyciag · korekta · odswiez · pomoc"""
+Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · kurs · wyciag · korekta · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

@@ -35,6 +35,8 @@ domeny ani HTTPS** na VPS.
 | `/korekta [konto] <kwota>` | saldo jak w banku: różnica jako wpis „Korekta salda” albo zmiana salda początkowego |
 | `/inwestycja <opis>` | nowa inwestycja, np. `/inwestycja srebro 2 uncje kupione 2024 za 600 zł` |
 | `/inwestycje` | wycena na żywo w PLN (metale: gold-api.com, ETF/akcje: Yahoo, kurs NBP), zysk/strata |
+| `/multisport` | czy karta Multisport się opłaca: wejścia ze Stravy, koszt wejścia, próg opłacalności |
+| `/strava` | jednorazowe połączenie konta Strava (OAuth) |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 

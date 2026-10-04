@@ -10,6 +10,14 @@ living:
   bazowy: 1400
   luźny: 2000
 
+# Opłacalność karty Multisport (aktywności ze Stravy — połącz przez /strava w bocie).
+multisport:
+  payment: multisport       # id płatności w config/schedule.yaml (z niej koszt miesięczny)
+  ticket: 25                # ile kosztowałoby jedno wejście bez karty
+  months: 6                 # ile miesięcy wstecz analizować
+  # Typy aktywności Stravy liczone jako wejście na kartę (pływanie z GPS = otwarta woda, pomijane).
+  sport_types: [WeightTraining, Workout, Crossfit, HighIntensityIntervalTraining, Swim, Yoga, Pilates, RockClimbing, Squash, Badminton]
+
 # Konta oszczędnościowe (nazwy jak w Wallet). target: cel w zł; monthly: stała wpłata miesięcznie
 # (0 = wpłaty tylko z dodatkowych dochodów); from: od którego miesiąca wpłacać (RRRR-MM, opcjonalnie).
 # Wpłaty to przelewy z konta Ogólne (w bocie: „300 na awaryjne”) — nie są wydatkiem, ale zmniejszają wolne środki.

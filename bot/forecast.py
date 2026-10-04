@@ -52,6 +52,7 @@ def load_assumptions(path: str) -> dict:
         "months": int(raw.get("months", 12)),
         "living": {str(k): float(v) for k, v in living.items()},
         "savings": raw.get("savings") or [],
+        "multisport": raw.get("multisport"),
     }
 
 
@@ -203,6 +204,22 @@ async def build(core: "Core") -> dict:
             except Exception:
                 continue
         accounts_pln += bal
+    # --- Multisport: opłacalność ze Stravy (błąd Stravy nie psuje prognozy) ---
+    from . import multisport
+
+    try:
+        ms = await multisport.analyze(core)
+    except Exception as e:
+        ms = {"status": "error", "error": str(e)}
+    if ms and ms.get("status") == "ok" and ms["avg_visits"] is not None:
+        insights.append({
+            "kind": "ok" if ms["worth_it"] else "warn",
+            "title": f"{ms['name']}: {'opłaca się' if ms['worth_it'] else 'nie opłaca się'}",
+            "text": f"Średnio {str(ms['avg_visits']).replace('.', ',')} wejść/mies. → {_z(ms['avg_per_visit'])} za wejście "
+                    f"(próg: {ms['breakeven']} wejść przy bilecie {_z(ms['ticket'])}). "
+                    f"Bilans vs bilety: {_z(ms['avg_saving'])} miesięcznie.",
+        })
+
     invest = await core.investments.valuate()
     invest_total = round(sum(i["value"] or 0 for i in invest), 2)
     debt_now = round(sum(d["now"] for d in debts), 2)
@@ -210,6 +227,7 @@ async def build(core: "Core") -> dict:
     return {
         "generated": today.isoformat(),
         "investments": invest,
+        "multisport": ms,
         "worth": {"accounts": round(accounts_pln, 2), "investments": invest_total, "debts": debt_now,
                   "net": round(accounts_pln + invest_total - debt_now, 2)},
         "base": base_key,

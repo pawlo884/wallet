@@ -610,3 +610,63 @@ async def investments():
 
 
 asyncio.run(investments())
+
+
+async def multisport_test():
+    """Multisport: wejścia ze Stravy vs próg, dedup dzienny, basen z GPS pomijany, w prognozie i stronie."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot import forecast, multisport, web
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "forecast.yaml").write_text(
+        "months: 12\nliving: {bazowy: 1400}\nmultisport: {payment: ms, ticket: 25, months: 3, "
+        "sport_types: [WeightTraining, Swim, Yoga]}\n", encoding="utf-8")
+    (tmp / "schedule.yaml").write_text(
+        "start: 2026-08-01\npayments:\n  - {id: ms, name: Multisport, amount: 232.09, category_id: food, rrule: FREQ=MONTHLY, from: 2026-01-03}\n",
+        encoding="utf-8")
+    os.environ.update(STATE_FILE=str(tmp / "s.json"), SCHEDULE_FILE=str(tmp / "schedule.yaml"), FORECAST_FILE=str(tmp / "forecast.yaml"))
+
+    def act(day, typ, gps=False):
+        return {"id": day + typ, "name": "", "type": typ, "date": day, "ts": 0, "gps": gps, "minutes": 60}
+
+    aug = [act(f"2026-08-{d:02d}", "WeightTraining") for d in range(1, 13)]           # 12 → opłaca się
+    sep = [act(f"2026-09-{d:02d}", "WeightTraining") for d in range(1, 5)] + [
+        act("2026-09-01", "WeightTraining"),                                              # duplikat dnia → nie liczy się
+        act("2026-09-10", "Swim"), act("2026-09-11", "Swim", gps=True),                  # basen + otwarta woda (pomijana)
+        act("2026-09-12", "Run"),                                                         # bieg — nie na kartę
+    ]
+    octo = [act("2026-10-02", "Yoga"), act("2026-10-03", "WeightTraining")]
+
+    class FakeStrava:
+        configured = connected = True
+        tokens = {"athlete": "Paweł"}
+        async def activities(self, after_ts):
+            return aug + sep + octo
+        async def close(self): pass
+
+    core = Core(Config())
+    core.wallet, core.parser, core.fx, core.strava = FakeWallet(), FakeParser(), FakeFX(), FakeStrava()
+    core.today = lambda: dt.date(2026, 10, 4)
+
+    a = await multisport.analyze(core)
+    assert a["breakeven"] == 10 and [r["visits"] for r in a["rows"]] == [12, 5, 2], [r["visits"] for r in a["rows"]]
+    assert a["rows"][1]["by_type"] == {"siłownia": 4, "basen": 1} and a["rows"][2]["partial"]
+    assert a["avg_visits"] == 8.5 and not a["worth_it"] and a["current"]["to_breakeven"] == 8
+    print(multisport.text(a))
+    f = await forecast.build(core)
+    assert f["multisport"]["status"] == "ok" and any(i["title"].startswith("Multisport") for i in f["insights"])
+    async with TestClient(TestServer(web.build_app(core))) as client:
+        assert '"multisport"' in await (await client.get("/")).text()
+
+    class NoStrava(FakeStrava):
+        configured = False
+    core.strava = NoStrava()
+    assert "STRAVA_CLIENT_ID" in (await core.multisport_report()).text
+    assert "strava.com/settings/api" in (await core.strava_connect("")).text
+    print("\nOK multisport")
+
+
+asyncio.run(multisport_test())
