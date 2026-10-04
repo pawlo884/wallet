@@ -1,7 +1,9 @@
+import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -145,7 +147,16 @@ def notifier(app: Application, core: Core):
 
 async def start(core: Core) -> Application:
     app = build(core)
-    await app.initialize()
+    # Chwilowy brak sieci przy starcie nie powinien wywracać kontenera — ponawiamy z rosnącą przerwą.
+    for attempt in range(1, 9):
+        try:
+            await app.initialize()
+            break
+        except (TimedOut, NetworkError) as e:
+            if attempt == 8:
+                raise
+            log.warning("Telegram niedostępny przy starcie (%s), próba %d/8", e, attempt)
+            await asyncio.sleep(min(5 * attempt, 30))
     await app.start()
     await app.updater.start_polling(drop_pending_updates=False)
     log.info("Telegram bot działa")

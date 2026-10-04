@@ -2,6 +2,8 @@ import asyncio
 import logging
 import signal
 
+import httpx
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,7 +39,10 @@ async def run() -> None:
     if not cfg.telegram_token and not cfg.discord_token:
         raise SystemExit("Ustaw TELEGRAM_BOT_TOKEN i/lub DISCORD_BOT_TOKEN")
     core = Core(cfg)
-    await core.refresh_catalog(force=True)  # wcześnie wykrywa zły token Wallet
+    try:
+        await core.refresh_catalog(force=True)  # wcześnie wykrywa zły token Wallet (WalletError = koniec)
+    except httpx.HTTPError as e:  # chwilowy brak sieci — katalog dociągnie się przy pierwszej wiadomości
+        log.warning("Wallet API niedostępne przy starcie: %r", e)
     if core.stt:
         stt_preload = asyncio.create_task(core.stt.preload())  # w tle; boty startują od razu  # noqa: F841
 
