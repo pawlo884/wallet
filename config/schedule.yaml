@@ -132,11 +132,12 @@ payments:
     from: 2025-12-28
 
   - id: ssd
-    name: Ssd
-    amount: 23.47
-    category_id: 5c5c1b5d-0046-8000-8000-000000000000   # PC, Communication
-    rrule: FREQ=MONTHLY;COUNT=13
-    from: 2025-11-30
+    name: Rata Ssd
+    amount: 23.45
+    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
+    rrule: FREQ=MONTHLY;COUNT=9     # kredyt 0% 465 zł, 11/20 spłacone; zostało 9 rat (10.2026–06.2027)
+    from: 2026-10-30
+    debt: ssd
 
   # --- roczne ---
   - id: grobek
