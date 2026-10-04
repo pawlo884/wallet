@@ -34,6 +34,13 @@ payments:
     rrule: FREQ=MONTHLY
     from: 2025-08-01
 
+  - id: jedzenie
+    name: Jedzenie
+    amount: 1150
+    category_id: 5c5c03e8-000a-8000-8000-000000000000   # Groceries
+    rrule: FREQ=MONTHLY
+    from: 2025-08-01
+
   - id: krecha
     name: Krecha
     amount: 964
@@ -124,5 +131,3 @@ payments:
 
   # Pominięte przy przenoszeniu:
   # - "A6 spłata" (1000 zł) — spłacone 9/9 rat.
-  # - "Jedzenie" (1150 zł/mies.) — to limit, nie płatność: zakupy wpisujesz na bieżąco przez bota,
-  #   więc jako płatność liczyłyby się podwójnie. Lepiej jako budżet w Wallet (kategoria Groceries).
