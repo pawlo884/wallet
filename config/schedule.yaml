@@ -50,6 +50,22 @@ payments:
     from: 2026-10-05
     debt: credit-agricole           # potwierdzona rata zmniejsza dług w /dlugi
 
+  - id: raty-opony
+    name: Rata Opony
+    amount: 147
+    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
+    rrule: FREQ=MONTHLY;COUNT=6     # 0%, zostało 6 rat (10.2026–03.2027)
+    from: 2026-10-26
+    debt: opony
+
+  - id: raty-opona
+    name: Rata Opona
+    amount: 71.10                   # ostatnia 70,95 (nadpłata 0,15 w 10.2026) — ✏️ Inna kwota
+    category_id: 5c5c1f42-0050-8000-8000-000000000000   # Loan, interests
+    rrule: FREQ=MONTHLY;COUNT=9     # 0%, październik zapłacony 04.10; zostało 9 rat (11.2026–07.2027)
+    from: 2026-11-29
+    debt: opona
+
   - id: krecha
     name: Krecha
     amount: 964
