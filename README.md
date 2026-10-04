@@ -109,7 +109,7 @@ Jednorazowa konfiguracja (te same sekrety co w repo `nc`):
 | `VPS_USER` | `pawel` |
 | `VPS_SSH_KEY` | prywatny klucz SSH z dostępem do VPS |
 
-Opcjonalnie zmienna `DEPLOY_PATH` (zakładka *Variables*), domyślnie `/home/pawel/wallet`.
+Opcjonalnie zmienna `DEPLOY_PATH` (zakładka *Variables*), domyślnie `/home/pawel/apps/wallet`.
 Bez sekretów workflow robi tylko testy i pomija deploy.
 
 Zmiana płatności cyklicznych = edycja `config/schedule.yaml` i push. Bot sam wczytuje nowy plik

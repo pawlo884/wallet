@@ -54,7 +54,7 @@ jobs:
           command_timeout: 10m
           script: |
             set -euo pipefail
-            cd "${{ vars.DEPLOY_PATH || '/home/pawel/wallet' }}"
+            cd "${{ vars.DEPLOY_PATH || '/home/pawel/apps/wallet' }}"
 
             echo "📥 Kod: $(git rev-parse --short HEAD) → ${{ github.sha }}"
             git fetch --quiet origin main
