@@ -38,6 +38,17 @@ class Config:
     stt_model: str = field(default_factory=lambda: os.getenv("STT_MODEL", "small"))
     stt_threads: int = field(default_factory=lambda: int(os.getenv("STT_THREADS", "4")))
 
+    # Skrzynka bota na wyciągi (IMAP). Puste MAIL_USER = wyłączone.
+    mail_imap_host: str = field(default_factory=lambda: os.getenv("MAIL_IMAP_HOST", "imap.gmail.com"))
+    mail_user: str = field(default_factory=lambda: os.getenv("MAIL_USER", ""))
+    mail_password: str = field(default_factory=lambda: os.getenv("MAIL_PASSWORD", ""))
+    mail_folder: str = field(default_factory=lambda: os.getenv("MAIL_FOLDER", "INBOX"))
+    mail_poll_minutes: int = field(default_factory=lambda: int(os.getenv("MAIL_POLL_MINUTES", "10")))
+    # Adresy/domeny, z których maile są przetwarzane (Twój adres i domena banku), np. "ja@gmail.com,mbank.pl"
+    mail_allowed_from: set[str] = field(
+        default_factory=lambda: {x.strip().lower() for x in os.getenv("MAIL_ALLOWED_FROM", "").split(",") if x.strip()}
+    )
+
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_allowed: set[int] = field(default_factory=lambda: _ids("TELEGRAM_ALLOWED_USERS"))
 

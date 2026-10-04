@@ -84,12 +84,26 @@ async def run() -> None:
     if notifiers:
         reminders = asyncio.create_task(reminder_loop(core, notifiers))
 
+    mail_task = None
+    if cfg.mail_user and cfg.mail_password and notifiers:
+        from .statement import MailWatcher
+
+        if not cfg.mail_allowed_from:
+            log.warning("MAIL_ALLOWED_FROM puste — maile będą tylko pokazywane, nie przetwarzane")
+
+        async def notify_all(reply) -> None:
+            for notify in notifiers:
+                await notify(reply)
+
+        mail_task = asyncio.create_task(MailWatcher(core, notify_all).loop())
+
     try:
         await stop.wait()
     finally:
         log.info("Zamykanie…")
-        if reminders:
-            reminders.cancel()
+        for task in (reminders, mail_task):
+            if task:
+                task.cancel()
         if tg_app:
             await telegram_bot.stop(tg_app)
         if dc_task:

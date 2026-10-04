@@ -288,3 +288,66 @@ async def memory_and_fx():
 
 
 asyncio.run(memory_and_fx())
+
+
+async def statements():
+    """Wyciąg: zgodne z Wallet, płatność cykliczna, brakujące → szkice; .eml; wykrywanie wklejki."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from bot.statement import email_to_text, looks_like_statement
+
+    os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"))
+
+    ops = [
+        rec(amount=54.3, type="expense", category_id="food", account_id="pln", date="2026-10-04", counterparty="Biedronka", note="zakupy"),
+        rec(amount=59.10, type="expense", category_id="food", account_id="pln", date="2026-10-05", counterparty="Anthropic", note="API"),
+        rec(amount=225, type="expense", category_id="food", account_id="pln", date="2026-10-03", counterparty="Benefit Systems", note="multisport"),
+        rec(amount=37.5, type="expense", category_id="food", account_id="pln", date="2026-10-05", counterparty="Apteka", note="leki"),
+    ]
+
+    class StmtParser(FakeParser):
+        async def parse_statement(self, text, today, catalog_prompt):
+            return ParseResult(records=[r.model_copy() for r in ops], amends=False, question=None)
+
+    class StmtWallet(FakeWallet):
+        async def records(self, *a, **k):
+            return [
+                {"id": "w1", "amount": {"value": -54.3}, "recordDate": "2026-10-04T10:00:00Z", "counterParty": "Biedronka"},
+                # 15 USD po NBP = 58,32 zł; bank pobrał 59,10 zł → zgodne w tolerancji kursu
+                {"id": "w2", "amount": {"value": -58.32}, "recordDate": "2026-10-04T12:00:00Z", "counterParty": "Anthropic",
+                 "note": "doładowanie · 15,00 USD po 3,8881 (NBP 02.10)"},
+            ]
+
+    core = Core(Config())
+    core.wallet, core.parser = StmtWallet(), StmtParser()
+    core.today = lambda: dt.date(2026, 10, 6)
+
+    replies = await core.statement("tg:1", "wyciąg…")
+    for r in replies:
+        print("---\n" + r.text, r.buttons or "")
+    assert "Operacje z wyciągu: 4" in replies[0].text and "już w Wallet: 2" in replies[0].text and "brakuje: 1" in replies[0].text
+    assert any(b[1].startswith("sp:multisport@20261003") for r in replies for b in r.buttons), "płatność cykliczna"
+    draft = replies[-1]
+    assert "Apteka" in draft.text and draft.buttons[0][1].startswith("ok:")
+    await core.handle_callback("tg:1", draft.buttons[0][1])
+    assert core.wallet.created[-1]["amount"]["value"] == -37.5
+
+    # szkic z maila ("*") może zatwierdzić każda dozwolona osoba
+    mail_replies = await core.reconciler.reconcile("*", "x", "maila")
+    ok = mail_replies[-1].buttons[0][1]
+    assert (await core.handle_callback("dc:7", ok)).text.startswith("✅")
+
+    eml = (
+        "From: Pawel <pawlo884@gmail.com>\r\nSubject: Fwd: Zestawienie operacji\r\nMIME-Version: 1.0\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        "<p>04.10 BIEDRONKA <b>-54,30</b> PLN</p><table><tr><td>05.10</td><td>APTEKA</td><td>-37,50</td></tr></table>"
+    ).encode()
+    sender, subject, text = email_to_text(eml)
+    print(sender, subject, repr(text))
+    assert "pawlo884@gmail.com" in sender and "BIEDRONKA -54,30 PLN" in text and "APTEKA | -37,50" in text
+    assert looks_like_statement("04.10 BIEDRONKA -54,30\n" * 20) and not looks_like_statement("biedronka 54,30")
+    print("\nOK statements")
+
+
+asyncio.run(statements())

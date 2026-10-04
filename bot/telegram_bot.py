@@ -108,6 +108,36 @@ def build(core: Core) -> Application:
         await send(update, await core.fx_quote(" ".join(ctx.args or [])))
 
     app.add_handler(CommandHandler("kurs", on_kurs, filters=user_filter))
+
+    async def on_wyciag(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+        text = (msg.text or "").split(None, 1)[1] if len((msg.text or "").split(None, 1)) > 1 else ""
+        await send(update, await core.statement(f"tg:{update.effective_user.id}", text))
+
+    async def on_statement_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.effective_message
+        await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+        f = await msg.document.get_file()
+        try:
+            replies = await core.statement_file(f"tg:{update.effective_user.id}", bytes(await f.download_as_bytearray()))
+        except Exception:
+            log.exception("Błąd wyciągu z pliku")
+            replies = Reply("⚠️ Nie udało się przetworzyć pliku.")
+        await send(update, replies)
+
+    app.add_handler(CommandHandler("wyciag", on_wyciag, filters=user_filter))
+    app.add_handler(
+        MessageHandler(
+            user_filter
+            & (
+                filters.Document.FileExtension("eml")
+                | filters.Document.MimeType("message/rfc822")
+                | filters.Document.MimeType("text/plain")
+            ),
+            on_statement_file,
+        )
+    )
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
     app.add_handler(
         MessageHandler(

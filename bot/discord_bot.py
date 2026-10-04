@@ -74,8 +74,9 @@ def build(core: Core) -> discord.Client:
         text = message.content.strip()
         command, args = "", ""
         if text[:1] in ("!", "/"):
-            command, _, args = text[1:].strip().partition(" ")
-            command = command.lower()
+            parts = text[1:].strip().split(None, 1)  # po komendzie może być nowa linia (wklejony wyciąg)
+            command = parts[0].lower() if parts else ""
+            args = parts[1] if len(parts) > 1 else ""
         if command == "whoami":
             await message.reply(f"Twoje Discord ID: {message.author.id}")
             return
@@ -84,6 +85,19 @@ def build(core: Core) -> discord.Client:
 
         if command in commands:
             await send(message.channel, await commands[command](), reference=message)
+            return
+        if command == "wyciag":
+            async with message.channel.typing():
+                replies = await core.statement(f"dc:{message.author.id}", args)
+            await send(message.channel, replies, reference=message)
+            return
+        doc = next(
+            (a for a in message.attachments if a.filename.lower().endswith((".eml", ".txt"))), None
+        )
+        if doc:  # udostępniony mail (.eml) albo tekst wyciągu
+            async with message.channel.typing():
+                replies = await core.statement_file(f"dc:{message.author.id}", await doc.read())
+            await send(message.channel, replies, reference=message)
             return
         if command == "kurs":
             await send(message.channel, await core.fx_quote(args), reference=message)

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
 from .fx import FX, FXError, resolve_code
+from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
 from .planned import Payment, Planned
@@ -70,6 +71,7 @@ class Core:
         self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
         self.fx = FX()
         self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
+        self.reconciler = Reconciler(self)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
@@ -167,14 +169,35 @@ class Core:
         if not text:
             return Reply("🎤 Nic nie usłyszałem — nagraj jeszcze raz.")
         reply = await self.handle_message(owner, text, [])
-        reply.text = f"🎤 „{text}”\n\n{reply.text}"
+        first = reply[0] if isinstance(reply, list) else reply
+        first.text = f"🎤 „{text}”\n\n{first.text}"
         return reply
 
-    async def handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
+    async def handle_message(
+        self, owner: str, text: str, images: list[tuple[bytes, str]]
+    ) -> Reply | list[Reply]:
+        if not images and looks_like_statement(text):  # wklejony/udostępniony wyciąg z banku
+            return await self.statement(owner, text)
         reply = await self._handle_message(owner, text, images)
         self.remember(owner, "user", ("[zdjęcie] " if images else "") + (text or ""))
         self.remember(owner, "assistant", reply.text)
         return reply
+
+    async def statement(self, owner: str, text: str, source: str = "wyciągu") -> list[Reply]:
+        if not text.strip():
+            return [Reply("📄 Wklej treść wyciągu po `/wyciag` albo przekaż maila z wyciągiem na adres bota.")]
+        try:
+            return await self.reconciler.reconcile(owner, text, source)
+        except WalletError as e:
+            return [Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")]
+
+    async def statement_file(self, owner: str, raw: bytes) -> list[Reply]:
+        """Plik .eml (udostępniony mail) albo .txt z wyciągiem."""
+        head = raw[:4000].lower()
+        if b"from:" in head and (b"subject:" in head or b"mime-version:" in head):
+            _, subject, text = email_to_text(raw)
+            return await self.statement(owner, text, f"maila „{subject[:40]}”")
+        return await self.statement(owner, raw.decode("utf-8", errors="replace"))
 
     async def _handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
         if not images and (amount_reply := await self.planned.maybe_amount_reply(owner, text)):
@@ -243,7 +266,7 @@ class Core:
             return await self._plan_callback(owner, action, key)
         if action in ("ok", "no"):
             draft = self._drafts.get(key)
-            if not draft or draft.owner != owner:
+            if not draft or draft.owner not in (owner, "*"):  # "*" = szkic z maila, dla każdej dozwolonej osoby
                 return Reply("Ten szkic wygasł albo został już obsłużony.")
             del self._drafts[key]
             if action == "no":
@@ -571,8 +594,10 @@ Pamiętam ostatnie ~30 min rozmowy, więc możesz poprawiać:
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
+Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
+🎤 Możesz też nagrać głosówkę.
 
-Komendy: saldo · miesiac · zaplanowane · plan · plany · kurs · odswiez · pomoc"""
+Komendy: saldo · miesiac · zaplanowane · plan · plany · kurs · wyciag · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

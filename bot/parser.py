@@ -65,6 +65,20 @@ PLAN_INSTRUCTIONS = """Tym razem NIE zapisujesz transakcji, tylko definiujesz P�
 """
 
 
+STATEMENT_INSTRUCTIONS = """Tym razem dostajesz WYCIĄG / ZESTAWIENIE OPERACJI z banku — zwykle
+przekazany mail (z nagłówkami, stopką, reklamami). Wyodrębnij KAŻDĄ zaksięgowaną operację jako rekord:
+- date: data operacji (transakcji), a gdy jest tylko data księgowania — ta.
+- amount: kwota w walucie rachunku (dodatnia), type: obciążenie = expense, uznanie = income.
+  Jeśli operacja była w obcej walucie, użyj kwoty PO przeliczeniu przez bank (w walucie rachunku), currency=null.
+- counterparty: oczyszczona nazwa odbiorcy/nadawcy ("ZAKUP PRZY UŻYCIU KARTY ... BIEDRONKA 1234 WARSZAWA"
+  → "Biedronka"), bez numerów kart, miast i kodów.
+- note: krótko po polsku, na co to prawdopodobnie poszło (jak przy zwykłych wpisach).
+- category_id: najlepiej pasująca kategoria z listy.
+- POMIŃ: salda, sumy, limity, blokady/autoryzacje oczekujące, reklamy, stopki.
+amends=false. Jeśli tekst nie jest wyciągiem — records=[] i krótko wyjaśnij w question.
+"""
+
+
 SYSTEM_TEMPLATE = """Jesteś asystentem, który zapisuje transakcje do aplikacji finansowej Wallet.
 Użytkownik pisze po polsku, skrótowo, np. "biedronka 54,30", "paliwo 250 orlen wczoraj",
 "wypłata 6200", "kawa 14 i ciastko 9". Może też przysłać zdjęcie paragonu lub potwierdzenia.
@@ -160,6 +174,24 @@ class RecordParser:
             return ParseResult(
                 records=[], amends=False, question="Nie udało mi się tego odczytać. Napisz np. „biedronka 54,30”."
             )
+        return response.parsed_output
+
+    async def parse_statement(self, text: str, today: date, catalog_prompt: str) -> ParseResult:
+        response = await self._client.messages.parse(
+            model=self._model,
+            max_tokens=16000,  # wyciąg może mieć kilkadziesiąt operacji
+            system=[{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"{STATEMENT_INSTRUCTIONS}\nDzisiaj jest {today.isoformat()}.\n\n"
+                    f"<wyciag>\n{text[:60000]}\n</wyciag>",
+                }
+            ],
+            output_format=ParseResult,
+        )
+        if response.stop_reason == "refusal" or response.parsed_output is None:
+            return ParseResult(records=[], amends=False, question="Nie udało się odczytać wyciągu.")
         return response.parsed_output
 
     async def parse_plan(self, text: str, today: date, catalog_prompt: str) -> PlanResult:

@@ -28,6 +28,7 @@ domeny ani HTTPS** na VPS.
 | `/plan <opis>` | nowa płatność cykliczna, np. `/plan netflix 49 co miesiąc 15-go` (szkic + ✅ Dodaj) |
 | `/plany` | wszystkie płatności cykliczne z przyciskami 🗑 do usuwania |
 | `/kurs [kwota] [waluta] [na]` | kursy NBP; np. `/kurs`, `/kurs 100 eur`, `/kurs 50 usd eur` |
+| `/wyciag <treść>` | uzgodnienie wyciągu z banku z Wallet (albo wklej / wyślij .eml) |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -50,6 +51,23 @@ transkrypt 🎤 i dalej działa jak przy zwykłej wiadomości: szkic, ✅, popra
 - Model (~0,5 GB) pobiera się raz, w tle przy pierwszym starcie, do wolumenu `wallet-data`.
 - Kontener ma limit 1,5 GB RAM. Ustawienia `STT_MODEL` (tiny/base/small/medium), `STT_THREADS`
   i `STT_ENABLED` są w `.env`.
+
+## Wyciągi z banku (uzgadnianie)
+
+Bot porównuje wyciąg z wpisami w Wallet i przysyła **tylko brakujące operacje** jako szkice
+(✅ Zapisz / ❌ Pomiń). Operacje pasujące do niepotwierdzonej płatności cyklicznej dostajesz jako
+przypomnienie z ✅ Zapłacone. Dopasowanie: kwota + data ±3 dni (zakup a księgowanie), a dla wpisów
+przeliczonych kursem NBP tolerancja 4% (bank liczy po swoim kursie).
+
+Jak podać wyciąg:
+- **wklej treść maila** do bota (długi tekst z wieloma kwotami rozpozna sam) albo `/wyciag <treść>`;
+- **udostępnij maila jako plik `.eml`** albo `.txt` (Telegram, Discord);
+- **przekaż maila na skrzynkę bota**: bot sprawdza ją co `MAIL_POLL_MINUTES` min przez IMAP. Ustaw w poczcie
+  filtr auto-przekazywania wyciągów z banku, a wszystko będzie działo się samo.
+
+Konfiguracja skrzynki (`.env`): `MAIL_USER`, `MAIL_PASSWORD` (hasło aplikacji), `MAIL_ALLOWED_FROM`.
+Maile od innych nadawców są tylko pokazywane w bocie (np. kod weryfikacyjny przekierowania z Gmaila),
+nie są przetwarzane.
 
 ## Płatności cykliczne
 
