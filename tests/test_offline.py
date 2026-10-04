@@ -405,7 +405,8 @@ async def debts():
     from bot.planned import Payment
     core.wallet.create_label = lambda name, color="Orange": asyncio.sleep(0, {"id": "lbl-a6", "name": name})
     core.wallet.label_records = []  # atrapa ma jedną etykietę — czyścimy spłaty A6
-    await core.debts.add("Credit Agricole", 101 * 762.77, installment=762.77, info="kapitał 57 266,30 zł wg banku")
+    await core.debts.add("Credit Agricole", 57266.30, installment=762.77, paid_before=2165.32, monthly_rate=0.007)
+    assert "kapitał do spłaty *55 100,98 PLN*" in await core.debts.status_line(core.debts.items["credit-agricole"])
     assert core.debts.items["credit-agricole"].installment == 762.77
     core.planned.add(Payment(id="kredyt-ca-t", name="Rata CA", amount=762.77, type="expense",
                              category_id="food", rrule="FREQ=MONTHLY;COUNT=101", start=dt.date(2026, 10, 5),
@@ -413,8 +414,9 @@ async def debts():
     core.today = lambda: dt.date(2026, 10, 5)
     paid = await core.handle_callback("tg:1", "sp:kredyt-ca-t@20261005")
     print(paid.text)
-    assert core.wallet.created[-1]["labelIds"] == ["lbl-a6"] and "zostało *76 277,00 PLN*" in paid.text
-    assert "≈ 100 rat" in paid.text and "kapitał 57 266,30" in paid.text
+    # rata 762,77 = 385,71 odsetek (0,7% od 55 100,98) + 377,06 kapitału
+    assert core.wallet.created[-1]["labelIds"] == ["lbl-a6"] and "kapitał do spłaty *54 723,92 PLN*" in paid.text
+    assert "100 rat po 762,77" in paid.text and "oprocentowanie 8,40%" in paid.text
     print("\nOK debts")
 
 

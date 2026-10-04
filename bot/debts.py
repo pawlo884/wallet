@@ -1,8 +1,12 @@
-"""Długi spłacane bez stałych rat (np. „A6 — zostało 9 100 zł”).
+"""Długi: bez stałych rat (np. „A6 — zostało 9 100 zł”) i kredyty ratalne (np. Credit Agricole).
 
 Każdy dług ma etykietę w Wallet („Dług: A6”). Spłaty to zwykłe wydatki z tą etykietą —
-bot przypina ją sam, gdy rozpozna spłatę („spłata A6 500”), ale działa też etykieta dodana
-ręcznie w aplikacji. Ile zostało = kwota początkowa − suma wydatków z etykietą od daty dodania.
+bot przypina ją sam, gdy rozpozna spłatę („spłata A6 500”) albo przy potwierdzeniu raty
+z płatności cyklicznej; działa też etykieta dodana ręcznie w aplikacji.
+
+- Dług zwykły: zostało = total − paid_before − suma spłat od daty dodania.
+- Kredyt (installment + monthly_rate): kapitał liczony jak w banku (rata annuitetowa) —
+  każda wpłata najpierw pokrywa odsetki od pozostałego kapitału, reszta zmniejsza kapitał.
 """
 
 import json
@@ -29,7 +33,9 @@ class Debt:
     label_id: str
     category_id: str | None = None
     installment: float | None = None  # rata — wtedy pokazujemy też „zostało N rat”
-    info: str | None = None  # np. „kapitał 57 266,30 zł wg banku”
+    info: str | None = None  # dowolna notatka
+    paid_before: float = 0.0  # spłacone przed dodaniem do bota (kredyt: kapitał)
+    monthly_rate: float | None = None  # oprocentowanie miesięczne kredytu, np. 0.007 = 8,4% rocznie
 
 
 class Debts:
@@ -69,13 +75,16 @@ class Debts:
         category_id: str | None = None,
         installment: float | None = None,
         info: str | None = None,
+        paid_before: float = 0.0,
+        monthly_rate: float | None = None,
     ) -> Debt:
         did = re.sub(r"[^a-z0-9]+", "-", name.lower().translate(_PL)).strip("-")[:24] or "dlug"
         label_name = f"Dług: {name}"
         existing = next((l for l in await self.core.wallet.labels() if l.get("name") == label_name), None)
         label = existing or await self.core.wallet.create_label(label_name)
         debt = Debt(
-            did, name, round(abs(total), 2), self.core.today().isoformat(), label["id"], category_id, installment, info
+            did, name, round(abs(total), 2), self.core.today().isoformat(), label["id"], category_id, installment, info,
+            round(paid_before, 2), monthly_rate,
         )
         self.items[did] = debt
         self._save()
@@ -87,27 +96,56 @@ class Debts:
             self._save()
         return debt
 
-    async def paid(self, debt: Debt) -> float:
+    async def payments(self, debt: Debt) -> list[float]:
+        """Kwoty spłat (z etykietą) od daty dodania, w kolejności dat."""
         tomorrow = (self.core.today() + timedelta(days=1)).isoformat()
         records = await self.core.wallet.records(debt.start, tomorrow, labelId=debt.label_id)
-        return round(sum(-r["amount"]["value"] for r in records if (r.get("amount") or {}).get("value", 0) < 0), 2)
+        records = sorted(records, key=lambda r: r.get("recordDate", ""))
+        return [-r["amount"]["value"] for r in records if (r.get("amount") or {}).get("value", 0) < 0]
+
+    @staticmethod
+    def remaining(debt: Debt, payments: list[float]) -> float:
+        left = debt.total - debt.paid_before
+        for a in payments:
+            if debt.monthly_rate:  # rata pokrywa najpierw odsetki od pozostałego kapitału
+                left = left * (1 + debt.monthly_rate) - a
+            else:
+                left -= a
+        return round(max(left, 0), 2)
+
+    @staticmethod
+    def installments_left(debt: Debt, left: float) -> int | None:
+        if not debt.installment or left <= 0:
+            return None
+        r, a = debt.monthly_rate, debt.installment
+        if not r:
+            n = left / a
+        elif left * r >= a:  # rata nie pokrywa nawet odsetek
+            return None
+        else:
+            n = -math.log(1 - left * r / a) / math.log(1 + r)
+        # Oprocentowanie i kwoty są zaokrąglone — 100,02 raty to w praktyce 100 (bank wyrówna ostatnią ratą).
+        return round(n) if abs(n - round(n)) < 0.1 else math.ceil(n)
 
     async def status_line(self, debt: Debt) -> str:
         from .core import fmt_money
 
-        paid = await self.paid(debt)
-        left = max(debt.total - paid, 0)
+        left = self.remaining(debt, await self.payments(debt))
+        paid = round(debt.total - left, 2)
         cur = self.core.cfg.base_currency
         if left <= 0:
             return f"🎉 *{debt.name}* spłacone! ({fmt_money(debt.total, cur)})"
         pct = paid / debt.total if debt.total else 1
         bar = "▓" * round(pct * 10) + "░" * (10 - round(pct * 10))
+        what = "kapitał do spłaty" if debt.monthly_rate else "zostało"
         line = (
-            f"🏦 *{debt.name}*: zostało *{fmt_money(left, cur)}*\n"
+            f"🏦 *{debt.name}*: {what} *{fmt_money(left, cur)}*\n"
             f"   {bar} {pct:.0%} · spłacono {fmt_money(paid, cur)} z {fmt_money(debt.total, cur)}"
         )
-        if debt.installment:
-            line += f"\n   ≈ {math.ceil(round(left / debt.installment, 2))} rat po {fmt_money(debt.installment, cur)}"
+        if n := self.installments_left(debt, left):
+            line += f"\n   {'' if debt.monthly_rate else '≈ '}{n} rat po {fmt_money(debt.installment, cur)}"
+            if debt.monthly_rate:
+                line += f" · oprocentowanie {debt.monthly_rate * 1200:.2f}%".replace(".", ",")
         if debt.info:
             line += f"\n   _{debt.info}_"
         return line
