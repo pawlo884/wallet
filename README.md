@@ -1,0 +1,107 @@
+# wallet-bot
+
+Bot na Telegramie i Discordzie, który zapisuje wydatki i przychody do **BudgetBakers Wallet**.
+Piszesz „biedronka 54,30” albo wysyłasz zdjęcie paragonu. Claude rozpoznaje kwotę, kategorię, sklep
+i datę, bot pokazuje szkic, a po ✅ zapisuje rekord przez Wallet REST API. Działa też ↩️ *Cofnij*.
+
+```
+Telegram / Discord ──► kontener wallet-bot ──► Claude API   (parsowanie tekstu i paragonów)
+                                         └──► Wallet API   (rest.budgetbakers.com/wallet)
+```
+
+Kontener łączy się wyłącznie na zewnątrz (long polling / gateway), więc **nie trzeba otwierać portów,
+domeny ani HTTPS** na VPS.
+
+## Co umie
+
+| Wiadomość | Efekt |
+|---|---|
+| `biedronka 54,30` | wydatek, Zakupy spożywcze, Biedronka, dziś |
+| `paliwo 250 orlen wczoraj` | wydatek z wczorajszą datą |
+| `kawa 14 i ciastko 9` | dwa rekordy |
+| `wypłata 6200` | przychód |
+| `obiad 20 euro` | rekord na koncie w EUR |
+| 📷 zdjęcie paragonu | suma z paragonu, sklep, data |
+| `/saldo` (`!saldo` na Discordzie) | salda kont |
+| `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
+| `/odswiez` | ponowne pobranie kont i kategorii (np. po dodaniu nowej kategorii w aplikacji) |
+| `/whoami` | pokazuje Twoje ID (do konfiguracji) |
+
+## Konfiguracja krok po kroku
+
+### 1. Token Wallet
+Wallet Web (web.budgetbakers.com) → **Settings → API token** → wygeneruj. Wymaga planu Premium.
+
+### 2. Klucz Claude
+console.anthropic.com → API Keys. Domyślny model `claude-haiku-4-5` kosztuje grosze miesięcznie
+przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CLAUDE_MODEL` na
+`claude-sonnet-5-5`.
+
+### 3a. Telegram
+1. Napisz do **@BotFather** → `/newbot` → skopiuj token do `TELEGRAM_BOT_TOKEN`.
+2. Uruchom bota, napisz do niego `/whoami` i wpisz zwrócone ID do `TELEGRAM_ALLOWED_USERS`. Zrestartuj bota.
+3. Opcjonalnie w BotFather ustaw `/setcommands`:
+   ```
+   saldo - salda kont
+   miesiac - podsumowanie miesiąca
+   odswiez - odśwież kategorie
+   pomoc - pomoc
+   ```
+
+### 3b. Discord
+1. https://discord.com/developers/applications → **New Application** → zakładka **Bot** → *Reset Token*,
+   skopiuj go do `DISCORD_BOT_TOKEN`.
+2. W tej samej zakładce włącz **Message Content Intent**.
+3. **OAuth2 → URL Generator**: zakres `bot`, uprawnienia *Send Messages*, *Read Message History*,
+   *View Channels*. Otwórz link i dodaj bota na swój serwer (DM wymagają wspólnego serwera).
+4. Napisz do bota w DM `!whoami` i wpisz ID do `DISCORD_ALLOWED_USERS`.
+   Jeśli bot ma działać też na kanale, w `DISCORD_CHANNEL_IDS` podaj ID kanału
+   (Tryb dewelopera → PPM na kanale → Kopiuj ID).
+
+> Bot obsługuje tylko użytkowników z listy `*_ALLOWED_USERS`. Przy pustej liście odpowiada wyłącznie na `whoami`.
+
+## Uruchomienie na VPS
+
+```bash
+# na VPS
+git clone <repo> wallet && cd wallet     # albo: scp -r wallet pawel@192.168.50.31:~/
+cp .env.example .env && nano .env
+docker compose up -d --build
+docker compose logs -f
+```
+
+Aktualizacja: `git pull && docker compose up -d --build`.
+
+W Portainerze: *Stacks → Add stack → Repository* (albo wklej `docker-compose.yml`) i zmienne z `.env`
+wpisz w sekcji *Environment variables*.
+
+## Lokalnie (Windows)
+
+```bash
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env   # uzupełnij
+python -m bot.main
+```
+
+Test bez sieci (atrapy Wallet i Claude): `python -m tests.test_offline`
+
+## Struktura
+
+```
+bot/
+  main.py          start obu botów w jednej pętli asyncio
+  core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca
+  parser.py        Claude (structured outputs) → lista rekordów
+  wallet_api.py    klient Wallet REST API (paginacja, 409 sync, 429 limit)
+  telegram_bot.py  adapter Telegram (python-telegram-bot)
+  discord_bot.py   adapter Discord (discord.py)
+  config.py        zmienne środowiskowe
+```
+
+## Uwagi
+
+- Szkice i przyciski „Cofnij” są trzymane w pamięci, więc po restarcie kontenera stare przyciski przestają działać.
+  Same rekordy w Wallet zostają.
+- Limit Wallet API to 500 zapytań na godzinę. Bot zużywa 1 zapytanie na zapis i kilka na `/miesiac`.
+- Kategorie i konta są cache'owane przez godzinę. Po zmianach w aplikacji użyj `/odswiez`.

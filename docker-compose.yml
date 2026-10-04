@@ -1,0 +1,22 @@
+services:
+  wallet-bot:
+    build: .
+    image: wallet-bot:latest
+    container_name: wallet-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Europe/Warsaw
+    # Bot łączy się tylko na zewnątrz (Telegram long polling, Discord gateway,
+    # Wallet API, Anthropic API) — nie potrzebuje żadnych otwartych portów.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

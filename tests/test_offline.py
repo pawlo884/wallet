@@ -1,0 +1,71 @@
+"""Test przepływu bez sieci: atrapy Wallet API i Claude. Uruchom: python -m tests.test_offline"""
+import asyncio
+import inspect
+import os
+
+os.environ.setdefault("WALLET_API_TOKEN", "x")
+os.environ.setdefault("ANTHROPIC_API_KEY", "x")
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123:abc")
+
+from bot.config import Config
+from bot.core import Core
+from bot.parser import ParsedRecord, ParseResult
+from bot.wallet_api import UNKNOWN_EXPENSE
+
+ACC = [
+    {"id": "pln", "name": "Ogólne", "currencyCode": "PLN", "recordStats": {"recordCount": 182}, "balance": {"currentBalance": -10.5}},
+    {"id": "eur", "name": "Euro", "currencyCode": "EUR", "recordStats": {"recordCount": 2}, "balance": {"currentBalance": 325}},
+]
+CAT = [{"id": "food", "name": "Groceries", "group": {"name": "Food & Drinks"}}]
+
+
+class FakeWallet:
+    def __init__(self):
+        self.created, self.deleted = [], []
+    async def accounts(self): return ACC
+    async def categories(self): return CAT
+    async def create_records(self, recs):
+        self.created += recs
+        return [{"inputIndex": i, "success": True, "id": f"r{i}"} for i in range(len(recs))]
+    async def delete_records(self, ids): self.deleted += ids
+    async def records(self, *a, **k):
+        return [{"amount": {"value": -50}, "convertedAmount": {"value": -50}, "category": {"name": "Groceries"}},
+                {"amount": {"value": 100}, "convertedAmount": {"value": 100}}]
+    async def close(self): pass
+
+
+class FakeParser:
+    async def parse(self, text, images, today, catalog_prompt):
+        assert "Ogólne" in catalog_prompt and "Groceries" in catalog_prompt
+        return ParseResult(question=None, records=[
+            ParsedRecord(amount=-54.3, type="expense", category_id="food", account_id="pln", date=today.isoformat(), counterparty="Biedronka", note=None),
+            ParsedRecord(amount=20, type="expense", category_id="nope", account_id="bad", date="2999-01-01", counterparty=None, note="x"),
+        ])
+
+
+async def main():
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), FakeParser()
+    r = await core.handle_message("tg:1", "biedronka 54,30", [])
+    print(r.text, r.buttons, sep="\n")
+    ok = r.buttons[0][1]
+    assert (await core.handle_callback("tg:2", ok)).text.startswith("Ten szkic"), "obcy user nie może zatwierdzić"
+    saved = await core.handle_callback("tg:1", ok)
+    print(saved.text, saved.buttons, sep="\n")
+    c = core.wallet.created
+    assert c[0]["amount"]["value"] == -54.3 and c[0]["counterParty"] == "Biedronka"
+    assert c[1]["categoryId"] == UNKNOWN_EXPENSE and c[1]["accountId"] == "pln" and c[1]["amount"]["value"] == -20
+    undo = await core.handle_callback("tg:1", saved.buttons[0][1])
+    print(undo.text); assert core.wallet.deleted == ["r0", "r1"]
+    print((await core.balances()).text)
+    print((await core.month_summary()).text)
+
+    # adaptery się budują
+    from bot import telegram_bot, discord_bot
+    telegram_bot.build(core); discord_bot.build(core)
+    # SDK ma messages.parse z output_format
+    from anthropic import AsyncAnthropic
+    assert "output_format" in inspect.signature(AsyncAnthropic(api_key="x").messages.parse).parameters
+    print("\nOK")
+
+asyncio.run(main())
