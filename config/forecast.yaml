@@ -15,6 +15,7 @@ multisport:
   payment: multisport       # id płatności w config/schedule.yaml (z niej koszt miesięczny)
   ticket: 25                # ile kosztowałoby jedno wejście bez karty
   months: 6                 # ile miesięcy wstecz analizować
+  coach: true               # motywacja: gratulacje po wejściu, status w poniedziałki, ostrzeżenie pod koniec miesiąca
   # Typy aktywności Stravy liczone jako wejście na kartę (pływanie z GPS = otwarta woda, pomijane).
   sport_types: [WeightTraining, Workout, Crossfit, HighIntensityIntervalTraining, Swim, Yoga, Pilates, RockClimbing, Squash, Badminton]
 

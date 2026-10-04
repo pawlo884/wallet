@@ -23,9 +23,20 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
     płatności (każdy termin najwyżej raz dziennie — stan w pliku, więc restart nie dubluje)."""
     from datetime import datetime
 
+    from . import multisport
+
     synced_on = None  # wycena kont inwestycyjnych (np. „Srebro”) — raz dziennie
+    coached_at = 0.0  # motywacja Multisport (Strava) — co 2 godziny, w godzinach 8–22
     while True:
         now = datetime.now(core.cfg.tz)
+        if 8 <= now.hour < 22 and now.timestamp() - coached_at > 2 * 3600:
+            coached_at = now.timestamp()
+            try:
+                for reply in await multisport.coach(core):
+                    for notify in notifiers:
+                        await notify(reply)
+            except Exception as e:  # Strava niedostępna / niepołączona — spróbujemy za 2 h
+                log.warning("Multisport coach: %r", e)
         try:
             if now.hour >= core.cfg.reminder_hour:
                 for reply in await core.due_reminders():

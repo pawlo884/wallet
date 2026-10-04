@@ -677,6 +677,28 @@ async def multisport_test():
     btn = _markup(r).inline_keyboard[0][0]
     assert btn.url == url and btn.callback_data is None
     await real.close()
+
+    # Motywacja: pierwszy przebieg cicho; nowe wejście → gratulacje; poniedziałek → status; koniec miesiąca → ostrzeżenie
+    core.strava = FakeStrava()
+    acts_now = list(octo)
+    async def acts(after_ts):
+        return aug + sep + acts_now
+    core.strava.activities = acts
+    days = iter([dt.date(2026, 10, 4), dt.date(2026, 10, 5), dt.date(2026, 10, 5), dt.date(2026, 10, 25), dt.date(2026, 11, 2)])
+    def run(day):
+        core.today = lambda: day
+        return multisport.coach(core)
+    assert await run(next(days)) == [], "pierwsze uruchomienie bez spamu"
+    acts_now.append(act("2026-10-05", "Swim"))
+    msgs = [r.text for r in await run(next(days))]  # poniedziałek 5.10
+    print("\n".join(msgs))
+    assert any("Wejście 3/10" in m and "116 zł → *77 zł*" in m for m in msgs) and any("tydzień" in m for m in msgs)
+    assert await run(next(days)) == [], "ten sam dzień — bez powtórek"
+    msgs = [r.text for r in await run(next(days))]  # 25.10, 6 dni do końca
+    assert len(msgs) == 1 and "Tydzień do końca miesiąca" in msgs[0], msgs
+    msgs = [r.text for r in await run(next(days))]  # 2.11 (poniedziałek): podsumowanie października + tydzień
+    print("\n".join(msgs))
+    assert any("październik 2026" in m and "3/10" in m and "zabrakło 7" in m for m in msgs)
     print("\nOK multisport")
 
 

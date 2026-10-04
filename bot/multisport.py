@@ -71,11 +71,69 @@ async def analyze(core: "Core") -> dict | None:
     days_left = calendar.monthrange(today.year, today.month)[1] - today.day
     return {
         **base, "status": "ok", "athlete": strava.tokens.get("athlete", ""), "rows": rows,
+        "coach": bool(cfg.get("coach", True)),
+        # Wejścia bieżącego miesiąca jako klucze „data|typ” (do powiadomień o nowych treningach).
+        "current_visits": sorted(f"{d}|{t}" for d, t in visits if d.startswith(cur["month"])),
         "avg_visits": avg, "avg_saving": avg_saving,
         "avg_per_visit": round(fee / avg, 2) if avg else None,
         "worth_it": (avg is not None and breakeven is not None and avg >= breakeven),
         "current": {"visits": cur["visits"], "to_breakeven": max((breakeven or 0) - cur["visits"], 0), "days_left": days_left},
     }
+
+
+async def coach(core: "Core") -> list:
+    """Motywacja: gratulacje po nowym wejściu, status w poniedziałki, ostrzeżenie na tydzień przed
+    końcem miesiąca, podsumowanie poprzedniego miesiąca. Stan w state.json — nic się nie dubluje."""
+    from .core import Reply
+
+    a = await analyze(core)
+    if not a or a.get("status") != "ok" or not a.get("coach"):
+        return []
+    state = core.planned.state
+    st = state.data.setdefault("multisport", {})
+    today, B, fee = core.today(), a["breakeven"], a["fee"]
+    ym, cur = today.strftime("%Y-%m"), a["rows"][-1]
+    visits = a["current_visits"]
+    out = []
+
+    if st.get("month") != ym:
+        if st.get("month") and len(a["rows"]) >= 2 and a["rows"][-2]["month"] == st["month"]:
+            p = a["rows"][-2]
+            per = f"{p['per_visit']:.0f} zł za wejście" if p["per_visit"] else "żadnego wejścia"
+            verdict = "karta się zwróciła 🎉" if p["visits"] >= B else f"zabrakło {B - p['visits']} do progu"
+            out.append(Reply(f"📊 *Multisport — {p['label']}:* {p['visits']}/{B} wejść, {per} — {verdict}.\n"
+                             f"Nowy miesiąc, nowy licznik. Cel: {B} wejść, czyli ~{math.ceil(B / 4.3)} w tygodniu 💪"))
+        first_run = "month" not in st
+        st.update(month=ym, seen=visits if first_run else [], weekly=None, late=None)
+
+    new = [v for v in visits if v not in set(st["seen"])]
+    if new:
+        k = len(visits)
+        kinds = ", ".join(TYPE_PL.get(v.split("|")[1], v.split("|")[1]) for v in new)
+        before = f"{fee / (k - len(new)):.0f} zł → " if k - len(new) else ""
+        msg = f"💪 *Wejście {k}/{B}* ({kinds}) — koszt wejścia w tym miesiącu: {before}*{fee / k:.0f} zł*"
+        if k >= B and k - len(new) < B:
+            msg += "\n🎉 Karta zwróciła się w tym miesiącu! Każde kolejne wejście to czysty zysk."
+        elif k < B:
+            msg += f"\nDo progu opłacalności: {B - k}."
+        out.append(Reply(msg))
+        st["seen"] = visits
+
+    left = max(B - cur["visits"], 0)
+    days_left = a["current"]["days_left"]
+    if today.weekday() == 0 and st.get("weekly") != today.isoformat() and today.day > 1:
+        weeks = max(days_left / 7, 1 / 7)
+        pace = f"~{math.ceil(left / weeks)} w tygodniu" if left else "próg już zaliczony ✅"
+        cost = f"{fee / cur['visits']:.0f} zł" if cur["visits"] else f"{fee:.0f} zł (jeszcze ani jednego)"
+        out.append(Reply(f"📅 *Multisport — tydzień:* {cur['visits']}/{B} wejść, zostało {days_left} dni → {pace}.\n"
+                         f"Teraz jedno wejście kosztuje Cię {cost}."))
+        st["weekly"] = today.isoformat()
+    if 0 < days_left <= 7 and left and st.get("late") != ym:
+        out.append(Reply(f"⏰ *Tydzień do końca miesiąca:* {cur['visits']}/{B} wejść. Brakuje {left} — "
+                         f"{'da się, ' if left <= days_left else ''}to {left} treningów w {days_left} dni."))
+        st["late"] = ym
+    state._save()
+    return out
 
 
 def text(a: dict | None) -> str:
