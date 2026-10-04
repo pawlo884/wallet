@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import (
@@ -16,6 +16,23 @@ from telegram.ext import (
 from .core import HELP, Core, Reply
 
 log = logging.getLogger(__name__)
+
+
+# Lista komend widoczna w Telegramie (kolejność = kolejność w menu).
+COMMANDS = [
+    ("saldo", "Salda kont"),
+    ("miesiac", "Podsumowanie bieżącego miesiąca"),
+    ("prognoza", "Prognoza na 12 miesięcy"),
+    ("zaplanowane", "Płatności do potwierdzenia i najbliższe 30 dni"),
+    ("plany", "Lista płatności cyklicznych (usuwanie)"),
+    ("plan", "Nowa płatność cykliczna, np. /plan netflix 49 15-go"),
+    ("dlugi", "Długi i ile zostało do spłaty"),
+    ("dlug", "Nowy dług, np. /dlug A6 9100"),
+    ("kurs", "Kursy NBP, np. /kurs 100 eur"),
+    ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
+    ("odswiez", "Odśwież konta i kategorie"),
+    ("pomoc", "Jak korzystać z bota"),
+]
 
 
 def _markup(reply: Reply) -> InlineKeyboardMarkup | None:
@@ -195,6 +212,10 @@ async def start(core: Core) -> Application:
             log.warning("Telegram niedostępny przy starcie (%s), próba %d/8", e, attempt)
             await asyncio.sleep(min(5 * attempt, 30))
     await app.start()
+    try:  # podpowiedzi po wpisaniu „/” i przycisk Menu — zawsze zgodne z tym, co bot obsługuje
+        await app.bot.set_my_commands([BotCommand(c, d) for c, d in COMMANDS])
+    except (TimedOut, NetworkError) as e:
+        log.warning("Nie ustawiono listy komend: %s", e)
     await app.updater.start_polling(drop_pending_updates=False)
     log.info("Telegram bot działa")
     return app
