@@ -297,7 +297,14 @@ async def statements():
     from pathlib import Path
     from bot.statement import email_to_text, looks_like_statement
 
-    os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"))
+    # Własny harmonogram testowy — prawdziwe kwoty w config/schedule.yaml mogą się zmieniać.
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "schedule.yaml").write_text(
+        "start: 2026-10-01\npayments:\n"
+        "  - {id: multisport, name: Multi Sport, amount: 225, category_id: food, rrule: FREQ=MONTHLY, from: 2025-09-03}\n",
+        encoding="utf-8",
+    )
+    os.environ.update(SCHEDULE_FILE=str(tmp / "schedule.yaml"), STATE_FILE=str(tmp / "s.json"))
 
     ops = [
         rec(amount=54.3, type="expense", category_id="food", account_id="pln", date="2026-10-04", counterparty="Biedronka", note="zakupy"),
