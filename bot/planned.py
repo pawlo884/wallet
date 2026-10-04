@@ -82,7 +82,13 @@ class Payment:
 
     def occurrences(self, after: date, before: date) -> list[date]:
         """Terminy w przedziale [after, before] (włącznie)."""
-        rule = rrulestr(self.rrule, dtstart=datetime.combine(self.start, datetime.min.time()))
+        rule_text = self.rrule
+        parts = rule_text.upper()
+        if self.start.day > 28 and "FREQ=MONTHLY" in parts and "BYMONTHDAY" not in parts:
+            # 29–31. dzień: w krótszym miesiącu termin = ostatni dzień miesiąca (rrule domyślnie pomija taki miesiąc).
+            days = ",".join(str(d) for d in range(28, self.start.day + 1))
+            rule_text += f";BYMONTHDAY={days};BYSETPOS=-1"
+        rule = rrulestr(rule_text, dtstart=datetime.combine(self.start, datetime.min.time()))
         lo = datetime.combine(after, datetime.min.time())
         hi = datetime.combine(before, datetime.max.time())
         return [d.date() for d in rule.between(lo, hi, inc=True)]

@@ -417,6 +417,11 @@ async def debts():
     # rata 762,77 = 385,71 odsetek (0,7% od 55 100,98) + 377,06 kapitału
     assert core.wallet.created[-1]["labelIds"] == ["lbl-a6"] and "kapitał do spłaty *54 723,92 PLN*" in paid.text
     assert "100 rat po 762,77" in paid.text and "oprocentowanie 8,40%" in paid.text
+    # termin 29-go: w lutym 2027 → 28.02, liczba rat się nie zmienia
+    p29 = Payment(id="t29", name="t", amount=71.1, type="expense", category_id="food",
+                  rrule="FREQ=MONTHLY;COUNT=9", start=dt.date(2026, 11, 29))
+    occ = p29.occurrences(dt.date(2026, 1, 1), dt.date(2028, 1, 1))
+    assert len(occ) == 9 and dt.date(2027, 2, 28) in occ and occ[-1] == dt.date(2027, 7, 29), occ
     print("\nOK debts")
 
 
