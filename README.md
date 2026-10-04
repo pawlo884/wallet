@@ -24,7 +24,7 @@ domeny ani HTTPS** na VPS.
 | 📷 zdjęcie paragonu | suma z paragonu, sklep, data |
 | `/saldo` (`!saldo` na Discordzie) | salda kont |
 | `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
-| `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia + najbliższe 30 dni |
+| `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia, najbliższe 30 dni i lista do odhaczenia opłaconych z góry |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 

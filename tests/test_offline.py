@@ -112,6 +112,18 @@ async def planned():
         assert reloaded.state.handled(keys["multisport"])["status"] == "skipped"
         assert reloaded.state.handled(keys["krecha"])["status"] == "paid"
 
+    replies = await core.planned_overview()
+    picker = replies[-1]
+    assert picker.column and all(d.startswith('pk:') for _, d in picker.buttons)
+    future_key = picker.buttons[0][1][3:]
+    r = await core.handle_callback('tg:1', picker.buttons[0][1])
+    print('\nWybór:', r.text, r.buttons)
+    assert r.text.startswith('📅 *Termin')
+    r = await core.handle_callback('tg:1', f'sp:{future_key}')
+    print(r.text)
+    assert core.wallet.created[-1]['recordDate'].startswith('2026-10-04'), 'opłata z góry = data dzisiejsza'
+    later = __import__('datetime').date(2026, 11, 30)
+    assert future_key not in {f'{p.id}@{d:%Y%m%d}' for p, d in core.planned.pending(later)}
     for r in await core.planned_overview():
         print("---\n" + r.text, r.buttons or "")
     print("\nOK planned")

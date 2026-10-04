@@ -13,9 +13,13 @@ def _view(reply: Reply):
     if not reply.buttons:
         return discord.utils.MISSING
     view = discord.ui.View(timeout=None)
-    for label, data in reply.buttons:
+    for i, (label, data) in enumerate(reply.buttons[:25]):
         style = discord.ButtonStyle.danger if data.startswith(("no:", "ss:")) else discord.ButtonStyle.primary
-        view.add_item(discord.ui.Button(label=label, style=style, custom_id=data))
+        if data.startswith("pk:"):
+            style = discord.ButtonStyle.secondary
+        # Discord: max 5 wierszy po 5 przycisków; lista wyboru układa się po 5 w wierszu, wg dat.
+        row = i // 5 if reply.column else None
+        view.add_item(discord.ui.Button(label=label[:80], style=style, custom_id=data, row=row))
     return view
 
 

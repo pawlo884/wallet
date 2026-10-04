@@ -24,6 +24,8 @@ class Reply:
     text: str
     # (etykieta, callback_data) — adapter platformy zamienia je na przyciski.
     buttons: list[tuple[str, str]] = field(default_factory=list)
+    # True = każdy przycisk w osobnym wierszu (listy wyboru); False = wszystkie obok siebie.
+    column: bool = False
 
 
 @dataclass
@@ -139,7 +141,7 @@ class Core:
 
     async def handle_callback(self, owner: str, data: str) -> Reply:
         action, _, key = data.partition(":")
-        if action in ("sp", "sa", "ss"):
+        if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
         if action in ("ok", "no"):
             draft = self._drafts.get(key)

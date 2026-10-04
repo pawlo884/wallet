@@ -198,7 +198,7 @@ class Planned:
         from .core import Reply, fmt_money
 
         key = occ_key(p, d)
-        when = "Dziś" if d == today else f"Zaległe od {d:%d.%m}"
+        when = "Dziś" if d == today else f"Zaległe od {d:%d.%m}" if d < today else f"Termin {d:%d.%m}"
         verb = "Wpłynęło" if p.type == "income" else "Zapłacone"
         return Reply(
             f"📅 *{when}:* {p.name} {fmt_money(p.signed(), self.core.cfg.base_currency)}",
@@ -231,16 +231,32 @@ class Planned:
             ),
             key=lambda x: (x[1], x[0].name),
         )
+        def mark(p: Payment, d: date) -> str:
+            done = self.state.handled(occ_key(p, d))
+            return {"paid": "✅ ", "skipped": "⏭ "}.get((done or {}).get("status"), "")
+
+        open_upcoming = [(p, d) for p, d in upcoming if not self.state.handled(occ_key(p, d))]
         lines = []
         if pending:
             lines.append("⏳ *Do potwierdzenia:*")
             lines += [f"• {d:%d.%m}  {p.name}  {fmt_money(p.signed(), cur)}" for p, d in pending]
-        lines.append("\n📅 *Najbliższe 30 dni:*" if pending else "📅 *Najbliższe 30 dni:*")
-        lines += [f"• {d:%d.%m}  {p.name}  {fmt_money(p.signed(), cur)}" for p, d in upcoming] or ["• nic"]
-        total = sum(p.signed() for p, _ in pending + upcoming)
-        lines.append(f"\nRazem: {fmt_money(total, cur)}")
+            lines.append("")
+        lines.append("📅 *Najbliższe 30 dni:*")
+        lines += [f"• {mark(p, d)}{d:%d.%m}  {p.name}  {fmt_money(p.signed(), cur)}" for p, d in upcoming] or ["• nic"]
+        total = sum(p.signed() for p, _ in pending + open_upcoming)
+        lines.append(f"\nDo rozliczenia: {fmt_money(total, cur)}")
         # Każdy niepotwierdzony termin dostaje osobną wiadomość z przyciskami.
-        return [Reply("\n".join(lines))] + [self.reminder(p, d, today) for p, d in pending]
+        replies = [Reply("\n".join(lines))] + [self.reminder(p, d, today) for p, d in pending]
+        if open_upcoming:
+            # Lista wyboru: po kliknięciu przychodzi zwykłe przypomnienie z ✅ / ✏️ / ⏭.
+            replies.append(
+                Reply(
+                    "🗓 Opłacone wcześniej? Wybierz termin:",
+                    [(f"{d:%d.%m} · {p.name}", f"pk:{occ_key(p, d)}") for p, d in open_upcoming[:25]],
+                    column=True,
+                )
+            )
+        return replies
 
     async def handle_callback(self, owner: str, action: str, key: str) -> "Reply":
         from .core import Reply
@@ -251,6 +267,8 @@ class Planned:
             return Reply("Tej płatności nie ma już w harmonogramie.")
         if done := self.state.handled(key):
             return Reply(f"Już obsłużone ({'zapłacone' if done['status'] == 'paid' else 'pominięte'}).")
+        if action == "pk":
+            return self.reminder(p, parsed[1], self.core.today())
         if action == "ss":
             self.state.mark(key, "skipped")
             return Reply(f"⏭ Pominięto: {p.name} ({parsed[1]:%d.%m})")

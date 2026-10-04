@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 def _markup(reply: Reply) -> InlineKeyboardMarkup | None:
     if not reply.buttons:
         return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in reply.buttons]])
+    buttons = [InlineKeyboardButton(t, callback_data=d) for t, d in reply.buttons]
+    return InlineKeyboardMarkup([[b] for b in buttons] if reply.column else [buttons])
 
 
 async def _send(bot, chat_id: int, reply: Reply) -> None:
@@ -95,7 +96,7 @@ def build(core: Core) -> Application:
             on_message,
         )
     )
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk):"))
     return app
 
 
