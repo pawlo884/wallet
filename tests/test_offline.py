@@ -93,6 +93,12 @@ async def main():
     print(v.text)
     assert v.text.startswith("🎤 „biedronka 54,30”") and v.buttons[0][0] == "✅ Zapisz"
     import bot.stt  # moduł importuje się bez ładowania modelu
+    # dekodowanie audio tak, jak robi to faster-whisper (łapie niezgodne wersje PyAV) — bez modelu
+    import io
+    from pathlib import Path
+    from faster_whisper.audio import decode_audio
+    samples = decode_audio(io.BytesIO(Path(__file__).with_name("fixtures").joinpath("biedronka.wav").read_bytes()))
+    assert len(samples) > 16000, "co najmniej 1 s audio"
 
     # adaptery się budują
     from bot import telegram_bot, discord_bot
