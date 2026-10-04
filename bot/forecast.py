@@ -57,6 +57,8 @@ def load_assumptions(path: str) -> dict:
 
 async def build(core: "Core") -> dict:
     await core.refresh_catalog()
+    # Salda zawsze świeże (katalog kont w pamięci odświeża się co godzinę — po korekcie byłby nieaktualny).
+    live = {a["id"]: a for a in await core.wallet.accounts()}
     cfg = load_assumptions(core.cfg.forecast_file)
     today = core.today()
     start = today.replace(day=1)
@@ -89,7 +91,7 @@ async def build(core: "Core") -> dict:
     savings = []
     for s in cfg["savings"]:
         acc_id = core._find_account(s.get("account"))
-        acc = core._accounts.get(acc_id or "", {})
+        acc = live.get(acc_id or "", {})
         balance = float((acc.get("balance") or {}).get("currentBalance", 0)) if acc else 0.0
         target, monthly = float(s.get("target") or 0), float(s.get("monthly") or 0)
         since = str(s.get("from") or "")[:7]  # opcjonalnie: wpłaty od miesiąca RRRR-MM
@@ -189,7 +191,7 @@ async def build(core: "Core") -> dict:
 
     # --- majątek: salda kont (EUR po kursie NBP) + inwestycje − długi ---
     accounts_pln = 0.0
-    for acc in core._accounts.values():
+    for acc in live.values():
         if acc.get("excludeFromStats"):
             continue
         bal = float((acc.get("balance") or {}).get("currentBalance", 0))
