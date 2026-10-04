@@ -753,9 +753,11 @@ class Core:
             return Reply(f"✅ Strava połączona{': ' + who if who else ''}. Sprawdź: /multisport")
         status = f"Połączona: {s.tokens.get('athlete') or 'tak'}. Żeby połączyć ponownie:\n" if s.connected else ""
         return Reply(
-            f"🔗 {status}1. Otwórz link i kliknij *Authorize* (zostaw zgodę na odczyt aktywności):\n{s.auth_url()}\n\n"
+            f"🔗 {status}1. Kliknij przycisk poniżej i *Authorize* (zostaw zgodę na odczyt aktywności).\n"
             "2. Przeglądarka przejdzie na adres `http://localhost/exchange_token?...` — strona się nie otworzy, to normalne.\n"
-            "3. Skopiuj *cały adres* z paska i wyślij: `/strava <adres>`"
+            "3. Skopiuj *cały adres* z paska i wyślij: `/strava <adres>`",
+            # Link jako przycisk: w treści Markdown zjadał podkreślenia (client_id → clientid).
+            [("🔗 Autoryzuj w Stravie", s.auth_url())],
         )
 
     async def multisport_report(self) -> Reply:

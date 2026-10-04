@@ -43,7 +43,11 @@ COMMANDS = [
 def _markup(reply: Reply) -> InlineKeyboardMarkup | None:
     if not reply.buttons:
         return None
-    buttons = [InlineKeyboardButton(t, callback_data=d) for t, d in reply.buttons]
+    # Adres http(s) = przycisk-link (adres nietknięty przez Markdown); reszta = przycisk akcji.
+    buttons = [
+        InlineKeyboardButton(t, url=d) if d.startswith(("https://", "http://")) else InlineKeyboardButton(t, callback_data=d)
+        for t, d in reply.buttons
+    ]
     return InlineKeyboardMarkup([[b] for b in buttons] if reply.column else [buttons])
 
 

@@ -666,6 +666,17 @@ async def multisport_test():
     core.strava = NoStrava()
     assert "STRAVA_CLIENT_ID" in (await core.multisport_report()).text
     assert "strava.com/settings/api" in (await core.strava_connect("")).text
+    # link autoryzacji jako przycisk-URL (Markdown w treści zjadał podkreślenia w client_id)
+    from bot.strava import Strava
+    from bot.telegram_bot import _markup
+    real = Strava(core); real.client_id, real.client_secret = "123456", "x"
+    core.strava = real
+    r = await core.strava_connect("")
+    url = r.buttons[0][1]
+    assert "client_id=123456" in url and "response_type=code" in url and "client_id" not in r.text
+    btn = _markup(r).inline_keyboard[0][0]
+    assert btn.url == url and btn.callback_data is None
+    await real.close()
     print("\nOK multisport")
 
 
