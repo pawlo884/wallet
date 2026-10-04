@@ -36,8 +36,8 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
 
 async def run() -> None:
     cfg = Config()
-    if not cfg.telegram_token and not cfg.discord_token:
-        raise SystemExit("Ustaw TELEGRAM_BOT_TOKEN i/lub DISCORD_BOT_TOKEN")
+    if not cfg.telegram_token:
+        raise SystemExit("Ustaw TELEGRAM_BOT_TOKEN")
     core = Core(cfg)
     try:
         await core.refresh_catalog(force=True)  # wcześnie wykrywa zły token Wallet (WalletError = koniec)
@@ -54,35 +54,13 @@ async def run() -> None:
         except NotImplementedError:  # Windows
             pass
 
-    tg_app = None
-    dc_task = None
-    notifiers = []
-    if cfg.telegram_token:
-        from . import telegram_bot
+    from . import telegram_bot
 
-        if not cfg.telegram_allowed:
-            log.warning("TELEGRAM_ALLOWED_USERS puste — bot odpowie tylko na /whoami")
-        tg_app = await telegram_bot.start(core)
-        notifiers.append(telegram_bot.notifier(tg_app, core))
-    if cfg.discord_token:
-        from . import discord_bot
-
-        if not cfg.discord_allowed:
-            log.warning("DISCORD_ALLOWED_USERS puste — bot odpowie tylko na !whoami")
-        dc_client = discord_bot.build(core)
-        dc_task = asyncio.create_task(dc_client.start(cfg.discord_token))
-
-        def on_discord_exit(t: asyncio.Task) -> None:
-            if not t.cancelled() and t.exception():
-                log.error("Discord bot padł: %r", t.exception())
-                stop.set()  # restart kontenera przez Dockera
-
-        dc_task.add_done_callback(on_discord_exit)
-        notifiers.append(discord_bot.notifier(dc_client, core))
-
-    reminders = None
-    if notifiers:
-        reminders = asyncio.create_task(reminder_loop(core, notifiers))
+    if not cfg.telegram_allowed:
+        log.warning("TELEGRAM_ALLOWED_USERS puste — bot odpowie tylko na /whoami")
+    tg_app = await telegram_bot.start(core)
+    notifiers = [telegram_bot.notifier(tg_app, core)]
+    reminders = asyncio.create_task(reminder_loop(core, notifiers))
 
     web_runner = None
     if cfg.web_port:
@@ -94,7 +72,7 @@ async def run() -> None:
             log.warning("Strona prognozy nie wystartowała: %s", e)
 
     mail_task = None
-    if cfg.mail_user and cfg.mail_password and notifiers:
+    if cfg.mail_user and cfg.mail_password:
         from .statement import MailWatcher
 
         if not cfg.mail_allowed_from:
@@ -115,10 +93,7 @@ async def run() -> None:
                 task.cancel()
         if web_runner:
             await web_runner.cleanup()
-        if tg_app:
-            await telegram_bot.stop(tg_app)
-        if dc_task:
-            await dc_client.close()
+        await telegram_bot.stop(tg_app)
         await core.close()
 
 

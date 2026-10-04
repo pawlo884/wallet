@@ -56,8 +56,3 @@ class Config:
 
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_allowed: set[int] = field(default_factory=lambda: _ids("TELEGRAM_ALLOWED_USERS"))
-
-    discord_token: str = field(default_factory=lambda: os.getenv("DISCORD_BOT_TOKEN", ""))
-    discord_allowed: set[int] = field(default_factory=lambda: _ids("DISCORD_ALLOWED_USERS"))
-    # Kanały serwera, na których bot reaguje (poza DM). Puste = tylko DM.
-    discord_channels: set[int] = field(default_factory=lambda: _ids("DISCORD_CHANNEL_IDS"))

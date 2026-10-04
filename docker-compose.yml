@@ -7,7 +7,7 @@ services:
     env_file: .env
     environment:
       TZ: Europe/Warsaw
-    # Bot łączy się na zewnątrz (Telegram, Discord, Wallet API, Anthropic API) — bez otwartych portów.
+    # Bot łączy się na zewnątrz (Telegram, Wallet API, Anthropic API, NBP) — bez otwartych portów.
     # Strona prognozy (port 8080 w kontenerze) jest dostępna tylko w sieci Nginx Proxy Managera:
     # w NPM dodaj Proxy Host → wallet-bot:8080 z listą dostępu (np. internal-panels).
     expose:

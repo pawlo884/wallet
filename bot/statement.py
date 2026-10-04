@@ -131,7 +131,7 @@ class Reconciler:
             lines += [
                 f"• {date.fromisoformat(r.date):%d.%m} {fmt_money(signed(r), cur)} ↔ "
                 f"{(w.get('counterParty') or w.get('note') or (w.get('category') or {}).get('name', ''))[:40]}"
-                for r, w in matched[:20]  # limit długości wiadomości (Discord: 2000 znaków)
+                for r, w in matched[:20]  # długa lista zgodnych operacji nic nie wnosi
             ]
             if len(matched) > 20:
                 lines.append(f"• …i {len(matched) - 20} więcej")

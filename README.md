@@ -1,15 +1,15 @@
 # wallet-bot
 
-Bot na Telegramie i Discordzie, który zapisuje wydatki i przychody do **BudgetBakers Wallet**.
+Bot na Telegramie, który zapisuje wydatki i przychody do **BudgetBakers Wallet**.
 Piszesz „biedronka 54,30” albo wysyłasz zdjęcie paragonu. Claude rozpoznaje kwotę, kategorię, sklep
 i datę, bot pokazuje szkic, a po ✅ zapisuje rekord przez Wallet REST API. Działa też ↩️ *Cofnij*.
 
 ```
-Telegram / Discord ──► kontener wallet-bot ──► Claude API   (parsowanie tekstu i paragonów)
+Telegram ──► kontener wallet-bot ──► Claude API   (parsowanie tekstu i paragonów)
                                          └──► Wallet API   (rest.budgetbakers.com/wallet)
 ```
 
-Kontener łączy się wyłącznie na zewnątrz (long polling / gateway), więc **nie trzeba otwierać portów,
+Kontener łączy się wyłącznie na zewnątrz (long polling), więc **nie trzeba otwierać portów,
 domeny ani HTTPS** na VPS.
 
 ## Co umie
@@ -22,7 +22,7 @@ domeny ani HTTPS** na VPS.
 | `wypłata 6200` | przychód |
 | `obiad 20 euro` | rekord na koncie w EUR |
 | 📷 zdjęcie paragonu | suma z paragonu, sklep, data |
-| `/saldo` (`!saldo` na Discordzie) | salda kont |
+| `/saldo` | salda kont |
 | `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
 | `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia, najbliższe 30 dni i lista do odhaczenia opłaconych z góry |
 | `/plan <opis>` | nowa płatność cykliczna, np. `/plan netflix 49 co miesiąc 15-go` (szkic + ✅ Dodaj) |
@@ -46,7 +46,7 @@ domeny ani HTTPS** na VPS.
 
 ## Głosówki (mowa → tekst)
 
-Wyślij wiadomość głosową na Telegramie albo Discordzie, np. *„biedronka pięćdziesiąt cztery trzydzieści”*.
+Wyślij wiadomość głosową na Telegramie, np. *„biedronka pięćdziesiąt cztery trzydzieści”*.
 Bot rozpoznaje mowę **lokalnie na serwerze** (faster-whisper, model `small`, polski), pokazuje
 transkrypt 🎤 i dalej działa jak przy zwykłej wiadomości: szkic, ✅, poprawki.
 
@@ -64,7 +64,7 @@ przeliczonych kursem NBP tolerancja 4% (bank liczy po swoim kursie).
 
 Jak podać wyciąg:
 - **wklej treść maila** do bota (długi tekst z wieloma kwotami rozpozna sam) albo `/wyciag <treść>`;
-- **udostępnij maila jako plik `.eml`** albo `.txt` (Telegram, Discord);
+- **udostępnij maila jako plik `.eml`** albo `.txt`;
 - **przekaż maila na skrzynkę bota**: bot sprawdza ją co `MAIL_POLL_MINUTES` min przez IMAP. Ustaw w poczcie
   filtr auto-przekazywania wyciągów z banku, a wszystko będzie działo się samo.
 
@@ -122,7 +122,7 @@ console.anthropic.com → API Keys. Domyślny model `claude-haiku-4-5` kosztuje 
 przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CLAUDE_MODEL` na
 `claude-sonnet-5-5`.
 
-### 3a. Telegram
+### 3. Telegram
 1. Napisz do **@BotFather** → `/newbot` → skopiuj token do `TELEGRAM_BOT_TOKEN`.
 2. Uruchom bota, napisz do niego `/whoami` i wpisz zwrócone ID do `TELEGRAM_ALLOWED_USERS`. Zrestartuj bota.
 3. Opcjonalnie w BotFather ustaw `/setcommands`:
@@ -136,17 +136,8 @@ przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CL
    pomoc - pomoc
    ```
 
-### 3b. Discord
-1. https://discord.com/developers/applications → **New Application** → zakładka **Bot** → *Reset Token*,
-   skopiuj go do `DISCORD_BOT_TOKEN`.
-2. W tej samej zakładce włącz **Message Content Intent**.
-3. **OAuth2 → URL Generator**: zakres `bot`, uprawnienia *Send Messages*, *Read Message History*,
-   *View Channels*. Otwórz link i dodaj bota na swój serwer (DM wymagają wspólnego serwera).
-4. Napisz do bota w DM `!whoami` i wpisz ID do `DISCORD_ALLOWED_USERS`.
-   Jeśli bot ma działać też na kanale, w `DISCORD_CHANNEL_IDS` podaj ID kanału
-   (Tryb dewelopera → PPM na kanale → Kopiuj ID).
 
-> Bot obsługuje tylko użytkowników z listy `*_ALLOWED_USERS`. Przy pustej liście odpowiada wyłącznie na `whoami`.
+> Bot obsługuje tylko użytkowników z listy `TELEGRAM_ALLOWED_USERS`. Przy pustej liście odpowiada wyłącznie na `/whoami`.
 
 ## Uruchomienie na VPS
 
@@ -206,7 +197,6 @@ bot/
   parser.py        Claude (structured outputs) → lista rekordów
   wallet_api.py    klient Wallet REST API (paginacja, 409 sync, 429 limit)
   telegram_bot.py  adapter Telegram (python-telegram-bot)
-  discord_bot.py   adapter Discord (discord.py)
   config.py        zmienne środowiskowe
 ```
 

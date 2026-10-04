@@ -56,7 +56,7 @@ class STT:
     @staticmethod
     def _run(model, audio: bytes) -> str:
         segments, _ = model.transcribe(
-            io.BytesIO(audio),  # ogg/opus z Telegrama i Discorda dekoduje PyAV — bez systemowego ffmpeg
+            io.BytesIO(audio),  # ogg/opus z Telegrama dekoduje PyAV — bez systemowego ffmpeg
             language="pl",
             beam_size=5,
             vad_filter=True,

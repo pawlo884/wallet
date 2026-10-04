@@ -109,8 +109,8 @@ async def main():
     assert len(samples) > 16000, "co najmniej 1 s audio"
 
     # adaptery się budują
-    from bot import telegram_bot, discord_bot
-    telegram_bot.build(core); discord_bot.build(core)
+    from bot import telegram_bot
+    telegram_bot.build(core)
     # SDK ma messages.parse z output_format
     from anthropic import AsyncAnthropic
     assert "output_format" in inspect.signature(AsyncAnthropic(api_key="x").messages.parse).parameters
@@ -352,7 +352,7 @@ async def statements():
     # szkic z maila ("*") może zatwierdzić każda dozwolona osoba
     mail_replies = await core.reconciler.reconcile("*", "x", "maila")
     ok = mail_replies[-1].buttons[0][1]
-    assert (await core.handle_callback("dc:7", ok)).text.startswith("✅")
+    assert (await core.handle_callback("tg:7", ok)).text.startswith("✅")
 
     eml = (
         "From: Pawel <pawlo884@gmail.com>\r\nSubject: Fwd: Zestawienie operacji\r\nMIME-Version: 1.0\r\n"
