@@ -67,7 +67,9 @@ class Reconciler:
 
         dates = [date.fromisoformat(r.date) for r in ops]
         lo, hi = min(dates) - timedelta(days=MATCH_DAYS + 1), max(dates) + timedelta(days=MATCH_DAYS + 1)
-        existing = await core.wallet.records(lo.isoformat(), hi.isoformat())
+        # Tylko aktywne konta — zarchiwizowane (stara historia) nie mogą „zaliczać” operacji z wyciągu.
+        active = ",".join(list(core._accounts)[:10])
+        existing = await core.wallet.records(lo.isoformat(), hi.isoformat(), accountId=active) if active else []
         used: set[str] = set()
 
         def signed(r) -> float:

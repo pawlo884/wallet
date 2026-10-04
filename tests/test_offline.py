@@ -312,6 +312,7 @@ async def statements():
 
     class StmtWallet(FakeWallet):
         async def records(self, *a, **k):
+            assert k.get("accountId") == "pln,eur", "tylko aktywne konta"
             return [
                 {"id": "w1", "amount": {"value": -54.3}, "recordDate": "2026-10-04T10:00:00Z", "counterParty": "Biedronka"},
                 # 15 USD po NBP = 58,32 zł; bank pobrał 59,10 zł → zgodne w tolerancji kursu
