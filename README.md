@@ -25,6 +25,8 @@ domeny ani HTTPS** na VPS.
 | `/saldo` (`!saldo` na Discordzie) | salda kont |
 | `/miesiac` | przychody, wydatki, bilans, średnia dzienna i top kategorie w bieżącym miesiącu |
 | `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia, najbliższe 30 dni i lista do odhaczenia opłaconych z góry |
+| `/plan <opis>` | nowa płatność cykliczna, np. `/plan netflix 49 co miesiąc 15-go` (szkic + ✅ Dodaj) |
+| `/plany` | wszystkie płatności cykliczne z przyciskami 🗑 do usuwania |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -40,6 +42,9 @@ W dniu terminu, od godziny `REMINDER_HOUR`, bot wysyła przypomnienie:
 - **✅** zapisuje rekord z datą terminu.
 - **✏️** prosi o kwotę: odpisujesz np. `312,40`.
 - **⏭** oznacza termin jako pominięty.
+
+Nowe płatności dodajesz też z poziomu bota (`/plan …`). Trafiają do `data/payments.json` na wolumenie,
+nie do repo. `/plany` → 🗑 usuwa płatność dodaną przez bota albo wyłącza tę z pliku.
 
 Niepotwierdzone terminy przypominają się codziennie do skutku. Stan (co zapłacone, a co pominięte)
 leży w wolumenie `wallet-data`, więc przetrwa restart i przebudowę. „Cofnij” po zapisie przywraca
@@ -62,6 +67,9 @@ przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CL
    ```
    saldo - salda kont
    miesiac - podsumowanie miesiąca
+   zaplanowane - zaległe i najbliższe płatności
+   plan - dodaj płatność cykliczną
+   plany - lista i usuwanie płatności
    odswiez - odśwież kategorie
    pomoc - pomoc
    ```

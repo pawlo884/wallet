@@ -35,6 +35,7 @@ def build(core: Core) -> discord.Client:
         "miesiac": core.month_summary,
         "miesiąc": core.month_summary,
         "zaplanowane": core.planned_overview,
+        "plany": core.plans_list,
         "odswiez": core.refresh,
         "odśwież": core.refresh,
     }
@@ -71,7 +72,10 @@ def build(core: Core) -> discord.Client:
         if not is_dm and message.channel.id not in channels:
             return
         text = message.content.strip()
-        command = text[1:].strip().lower() if text[:1] in ("!", "/") else ""
+        command, args = "", ""
+        if text[:1] in ("!", "/"):
+            command, _, args = text[1:].strip().partition(" ")
+            command = command.lower()
         if command == "whoami":
             await message.reply(f"Twoje Discord ID: {message.author.id}")
             return
@@ -80,6 +84,11 @@ def build(core: Core) -> discord.Client:
 
         if command in commands:
             await send(message.channel, await commands[command](), reference=message)
+            return
+        if command == "plan":
+            async with message.channel.typing():
+                reply = await core.plan_add(f"dc:{message.author.id}", args)
+            await send(message.channel, reply, reference=message)
             return
         if command in ("pomoc", "help", "start"):
             await message.reply(HELP.replace("Komendy:", "Komendy (z `!`):"))

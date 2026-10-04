@@ -130,3 +130,54 @@ async def planned():
 
 
 asyncio.run(planned())
+
+
+async def plans():
+    """Dodawanie i usuwanie płatności cyklicznych przez bota (/plan, /plany)."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from bot.parser import PlanDraft, PlanResult
+
+    state = Path(tempfile.mkdtemp()) / "state.json"
+    os.environ.update(SCHEDULE_FILE="config/schedule.yaml", STATE_FILE=str(state))
+
+    class PlanParser(FakeParser):
+        async def parse_plan(self, text, today, catalog_prompt):
+            return PlanResult(question=None, plan=PlanDraft(
+                name="Netflix", amount=49, type="expense", category_id="food", freq="MONTHLY",
+                interval=1, first_date="2026-10-15", count=None, counterparty=None))
+
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), PlanParser()
+    core.today = lambda: dt.date(2026, 10, 4)
+    n_before = len(core.planned.schedule.payments)
+
+    assert "/plan" in (await core.plan_add("tg:1", "")).text
+    draft = await core.plan_add("tg:1", "netflix 49 co miesiąc 15-go")
+    print(draft.text, draft.buttons, sep="\n")
+    assert "15.10.2026" in draft.text
+    print((await core.handle_callback("tg:1", draft.buttons[0][1])).text)
+    assert core.planned.schedule.get("netflix") and len(core.planned.schedule.payments) == n_before + 1
+    assert Path(state).with_name("payments.json").is_file(), "zapis na wolumenie"
+
+    lst = await core.plans_list()
+    assert lst.column and ("🗑 Netflix", "rm:netflix") in lst.buttons
+    # termin 15.10 widoczny jako nadchodzący, bez zaległości sprzed dodania
+    assert ("netflix", dt.date(2026, 10, 15)) in [
+        (p.id, d) for p, d in core.planned.pending(dt.date(2026, 10, 15))
+    ]
+
+    ask = await core.handle_callback("tg:1", "rm:netflix")
+    assert ask.buttons[0][1] == "rmy:netflix"
+    print((await core.handle_callback("tg:1", "rmy:netflix")).text)
+    assert not core.planned.schedule.get("netflix")
+
+    # płatność z pliku: wyłączana w stanie, plik nietknięty
+    print((await core.handle_callback("tg:1", "rmy:spotify")).text)
+    from bot.planned import Planned
+    assert not Planned(core).schedule.get("spotify") and "spotify" in Path("config/schedule.yaml").read_text(encoding="utf-8")
+    print("\nOK plans")
+
+
+asyncio.run(plans())

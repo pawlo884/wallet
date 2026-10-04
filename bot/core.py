@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
-from .planned import Planned
+from .planned import Payment, Planned
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
 
 log = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class Core:
         self._drafts: dict[str, _Draft] = {}
         # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
         self._saved: dict[str, tuple[str, list[str], str | None]] = {}
+        self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
         self.planned = Planned(self)
 
     # ---------- katalog kont i kategorii ----------
@@ -143,6 +144,8 @@ class Core:
         action, _, key = data.partition(":")
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
+        if action in ("pa", "pn", "rm", "rmy", "keep"):
+            return await self._plan_callback(owner, action, key)
         if action in ("ok", "no"):
             draft = self._drafts.get(key)
             if not draft or draft.owner != owner:
@@ -294,6 +297,93 @@ class Core:
     async def due_reminders(self) -> list[Reply]:
         return await self.planned.due_reminders(self.today())
 
+    # ---------- definiowanie płatności cyklicznych (/plan, /plany) ----------
+
+    async def plan_add(self, owner: str, text: str) -> Reply:
+        if not text.strip():
+            return Reply(PLAN_HELP)
+        try:
+            await self.refresh_catalog()
+        except WalletError as e:
+            return Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")
+        today = self.today()
+        result = await self.parser.parse_plan(text, today, self._catalog_prompt)
+        d = result.plan
+        if not d or not d.amount:
+            return Reply(result.question or PLAN_HELP)
+        try:
+            first = date.fromisoformat(d.first_date)
+        except ValueError:
+            first = today
+        rule = f"FREQ={d.freq}"
+        if d.interval > 1:
+            rule += f";INTERVAL={d.interval}"
+        if d.count:
+            rule += f";COUNT={d.count}"
+        p = Payment(
+            id=self.planned.new_id(d.name),
+            name=d.name.strip()[:60],
+            amount=abs(d.amount),
+            type=d.type,
+            category_id=d.category_id if d.category_id in self._categories
+            else (UNKNOWN_INCOME if d.type == "income" else UNKNOWN_EXPENSE),
+            rrule=rule,
+            start=first,
+            counterparty=d.counterparty,
+            active_from=today,  # bez zaległości sprzed dodania
+            source="bot",
+        )
+        upcoming = p.occurrences(today, today + timedelta(days=800))[:3]
+        if not upcoming:
+            return Reply("Ta płatność nie ma żadnego terminu w przyszłości. Sprawdź datę lub liczbę rat.")
+
+        key = secrets.token_urlsafe(6)
+        self._plan_drafts[key] = (owner, p)
+        cat = self._categories.get(p.category_id, {}).get("name", "Nieznana")
+        return Reply(
+            f"🗓 *Nowa płatność cykliczna:*\n"
+            f"{p.name} {fmt_money(p.signed(), self.cfg.base_currency)} · {cat}\n"
+            f"{p.describe_rule()}\n"
+            f"Najbliższe: {', '.join(f'{x:%d.%m.%Y}' for x in upcoming)}",
+            [("✅ Dodaj", f"pa:{key}"), ("❌ Anuluj", f"pn:{key}")],
+        )
+
+    async def plans_list(self) -> Reply:
+        payments = sorted(self.planned.schedule.payments, key=lambda p: (p.type != "income", p.name.lower()))
+        if not payments:
+            return Reply(PLAN_HELP)
+        cur = self.cfg.base_currency
+        lines = ["🗂 *Płatności cykliczne:*"] + [
+            f"• {p.name} {fmt_money(p.signed(), cur)} — {p.describe_rule()}" for p in payments
+        ]
+        lines.append("\nDodaj: `/plan netflix 49 co miesiąc 15-go`. Usuń: przycisk poniżej.")
+        return Reply("\n".join(lines), [(f"🗑 {p.name}", f"rm:{p.id}") for p in payments[:25]], column=True)
+
+    async def _plan_callback(self, owner: str, action: str, key: str) -> Reply:
+        if action in ("pa", "pn"):
+            draft = self._plan_drafts.pop(key, None)
+            if not draft or draft[0] != owner:
+                return Reply("Ten szkic wygasł albo został już obsłużony.")
+            if action == "pn":
+                return Reply("❌ Anulowano.")
+            p = draft[1]
+            p.id = self.planned.new_id(p.name)  # na wypadek, gdyby w międzyczasie ktoś dodał tę samą nazwę
+            self.planned.add(p)
+            return Reply(f"✅ Dodano: *{p.name}* ({p.describe_rule()}). Przypomnę w dniu terminu.")
+        if action == "keep":
+            return Reply("OK, zostaje.")
+        p = self.planned.schedule.get(key)
+        if not p:
+            return Reply("Tej płatności już nie ma.")
+        if action == "rm":
+            note = "\n_(pochodzi z pliku w repo — zostanie wyłączona w bocie)_" if p.source == "file" else ""
+            return Reply(
+                f"Usunąć *{p.name}* ({p.describe_rule()})?{note}",
+                [("🗑 Tak, usuń", f"rmy:{p.id}"), ("Zostaw", "keep:")],
+            )
+        self.planned.remove(p.id)
+        return Reply(f"🗑 Usunięto: {p.name}")
+
     async def refresh(self) -> Reply:
         try:
             await self.refresh_catalog(force=True)
@@ -322,5 +412,15 @@ Po prostu napisz, np.:
 albo wyślij *zdjęcie paragonu*.
 
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
+Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 
-Komendy: saldo · miesiac · zaplanowane · odswiez · pomoc"""
+Komendy: saldo · miesiac · zaplanowane · plan · plany · odswiez · pomoc"""
+
+PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
+• `/plan netflix 49 co miesiąc 15-go`
+• `/plan czynsz 1800 10-tego`
+• `/plan OC auta 1200 co rok 20 marca`
+• `/plan rata telefonu 89 co miesiąc 5-go, 12 rat`
+• `/plan pensja 6200 10-go`
+
+Lista i usuwanie: `/plany`"""

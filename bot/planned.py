@@ -36,6 +36,46 @@ class Payment:
     start: date
     counterparty: str | None = None
     account: str | None = None  # nazwa lub ID; brak = konto domyślne
+    active_from: date | None = None  # terminy wcześniejsze ignorowane (płatności dodane przez bota)
+    source: str = "file"  # file = config/schedule.yaml, bot = dodane komendą /plan
+
+    def to_json(self) -> dict:
+        d = {
+            "id": self.id, "name": self.name, "amount": self.amount, "type": self.type,
+            "category_id": self.category_id, "rrule": self.rrule, "from": self.start.isoformat(),
+            "counterparty": self.counterparty, "account": self.account,
+            "active_from": self.active_from.isoformat() if self.active_from else None,
+        }
+        return {k: v for k, v in d.items() if v is not None}
+
+    @classmethod
+    def from_dict(cls, p: dict, source: str) -> "Payment":
+        pid = str(p["id"])
+        if not _ID_RE.match(pid):
+            raise ValueError(f"schedule: id '{pid}' — tylko a-z, 0-9, _ i -, max 24 znaki")
+        return cls(
+            id=pid,
+            name=p["name"],
+            amount=float(p["amount"]),
+            type=p.get("type", "expense"),
+            category_id=p["category_id"],
+            rrule=p.get("rrule", "FREQ=MONTHLY"),
+            start=_as_date(p["from"]),
+            counterparty=p.get("counterparty"),
+            account=p.get("account"),
+            active_from=_as_date(p["active_from"]) if p.get("active_from") else None,
+            source=source,
+        )
+
+    def describe_rule(self) -> str:
+        r = dict(part.split("=", 1) for part in self.rrule.upper().split(";") if "=" in part)
+        n = int(r.get("INTERVAL", 1))
+        base = {
+            "MONTHLY": f"co miesiąc, {self.start.day}." if n == 1 else f"co {n} mies., {self.start.day}.",
+            "YEARLY": f"co rok, {self.start:%d.%m}" if n == 1 else f"co {n} lata, {self.start:%d.%m}",
+            "WEEKLY": "co tydzień" if n == 1 else f"co {n} tyg.",
+        }.get(r.get("FREQ", ""), self.rrule)
+        return base + (f", {r['COUNT']} razy" if "COUNT" in r else "")
 
     def occurrences(self, after: date, before: date) -> list[date]:
         """Terminy w przedziale [after, before] (włącznie)."""
@@ -57,27 +97,10 @@ class Schedule:
     @classmethod
     def load(cls, path: str) -> "Schedule":
         if not Path(path).is_file():
-            log.info("Brak %s — płatności cykliczne wyłączone", path)
-            return cls(date.max, [])
+            log.info("Brak %s — tylko płatności dodane przez bota", path)
+            return cls(date.min, [])
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-        payments = []
-        for p in raw.get("payments") or []:
-            pid = str(p["id"])
-            if not _ID_RE.match(pid):
-                raise ValueError(f"schedule: id '{pid}' — tylko a-z, 0-9, _ i -, max 24 znaki")
-            payments.append(
-                Payment(
-                    id=pid,
-                    name=p["name"],
-                    amount=float(p["amount"]),
-                    type=p.get("type", "expense"),
-                    category_id=p["category_id"],
-                    rrule=p.get("rrule", "FREQ=MONTHLY"),
-                    start=_as_date(p["from"]),
-                    counterparty=p.get("counterparty"),
-                    account=p.get("account"),
-                )
-            )
+        payments = [Payment.from_dict(p, "file") for p in raw.get("payments") or []]
         if len({p.id for p in payments}) != len(payments):
             raise ValueError("schedule: id płatności muszą być unikalne")
         log.info("Płatności cykliczne: %d", len(payments))
@@ -143,6 +166,9 @@ def parse_amount(text: str) -> float | None:
     return float(m.group(1).replace(" ", "").replace(",", "."))
 
 
+_PL = str.maketrans("ąćęłńóśźż", "acelnoszz")
+
+
 def _as_date(v) -> date:
     return v if isinstance(v, date) else date.fromisoformat(str(v))
 
@@ -152,13 +178,58 @@ class Planned:
 
     def __init__(self, core: "Core"):
         self.core = core
-        self.schedule = Schedule.load(core.cfg.schedule_file)
+        self._file = Schedule.load(core.cfg.schedule_file)
         self._mtime = self._file_mtime()
         self.state = State(core.cfg.state_file)
+        # Płatności dodane przez bota — obok stanu, na wolumenie (plik YAML jest tylko do odczytu).
+        self._extra_path = Path(core.cfg.state_file).with_name("payments.json")
+        self._extra = self._load_extra()
         self._awaiting_amount: dict[str, str] = {}  # właściciel → klucz terminu
 
+    @property
+    def schedule(self) -> Schedule:
+        disabled = set(self.state.data.get("disabled", []))
+        payments = [p for p in self._file.payments + self._extra if p.id not in disabled]
+        return Schedule(self._file.start, payments)
+
+    def _load_extra(self) -> list[Payment]:
+        if not self._extra_path.is_file():
+            return []
+        return [Payment.from_dict(p, "bot") for p in json.loads(self._extra_path.read_text(encoding="utf-8"))]
+
+    def _save_extra(self) -> None:
+        self._extra_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._extra_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps([p.to_json() for p in self._extra], ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, self._extra_path)
+
+    def new_id(self, name: str) -> str:
+        base = re.sub(r"[^a-z0-9]+", "-", name.lower().translate(_PL)).strip("-")[:20] or "platnosc"
+        taken = {p.id for p in self._file.payments + self._extra}
+        pid, n = base, 2
+        while pid in taken:
+            pid, n = f"{base[:20]}-{n}", n + 1
+        return pid
+
+    def add(self, p: Payment) -> None:
+        p.source = "bot"
+        self._extra.append(p)
+        self._save_extra()
+
+    def remove(self, pid: str) -> Payment | None:
+        p = self.schedule.get(pid)
+        if not p:
+            return None
+        if p.source == "bot":
+            self._extra = [x for x in self._extra if x.id != pid]
+            self._save_extra()
+        else:  # z pliku w repo — tylko wyłączamy, plik zostaje nietknięty
+            self.state.data.setdefault("disabled", []).append(pid)
+            self.state._save()
+        return p
+
     def reload(self) -> None:
-        self.schedule = Schedule.load(self.core.cfg.schedule_file)
+        self._file = Schedule.load(self.core.cfg.schedule_file)
         self._mtime = self._file_mtime()
 
     def _file_mtime(self) -> float | None:
@@ -185,11 +256,12 @@ class Planned:
     def pending(self, today: date) -> list[tuple[Payment, date]]:
         """Terminy do dziś włącznie, jeszcze niepotwierdzone i niepominięte."""
         self.reload_if_changed()
-        lo = max(self.schedule.start, today - timedelta(days=LOOKBACK_DAYS))
+        sched = self.schedule
+        lo = max(sched.start, today - timedelta(days=LOOKBACK_DAYS))
         out = [
             (p, d)
-            for p in self.schedule.payments
-            for d in p.occurrences(lo, today)
+            for p in sched.payments
+            for d in p.occurrences(max(lo, p.active_from or lo), today)
             if not self.state.handled(occ_key(p, d))
         ]
         return sorted(out, key=lambda x: (x[1], x[0].name))
@@ -220,7 +292,7 @@ class Planned:
 
         self.reload_if_changed()
         if not self.enabled:
-            return [Reply("Brak płatności cyklicznych (plik schedule.yaml).")]
+            return [Reply("Brak płatności cyklicznych. Dodaj np. `/plan netflix 49 co miesiąc 15-go`.")]
         cur = self.core.cfg.base_currency
         pending = self.pending(today)
         upcoming = sorted(

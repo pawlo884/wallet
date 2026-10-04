@@ -89,6 +89,18 @@ def build(core: Core) -> Application:
     app.add_handler(CommandHandler("saldo", cmd(core.balances), filters=user_filter))
     app.add_handler(CommandHandler("miesiac", cmd(core.month_summary), filters=user_filter))
     app.add_handler(CommandHandler("zaplanowane", cmd(core.planned_overview), filters=user_filter))
+    app.add_handler(CommandHandler("plany", cmd(core.plans_list), filters=user_filter))
+
+    async def on_plan(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+        try:
+            reply = await core.plan_add(f"tg:{update.effective_user.id}", " ".join(ctx.args or []))
+        except Exception:
+            log.exception("Błąd /plan")
+            reply = Reply("⚠️ Coś poszło nie tak. Spróbuj ponownie za chwilę.")
+        await send(update, reply)
+
+    app.add_handler(CommandHandler("plan", on_plan, filters=user_filter))
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
     app.add_handler(
         MessageHandler(
@@ -96,7 +108,7 @@ def build(core: Core) -> Application:
             on_message,
         )
     )
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep):"))
     return app
 
 
