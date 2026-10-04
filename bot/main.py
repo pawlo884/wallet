@@ -26,16 +26,16 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
     from . import multisport
 
     synced_on = None  # wycena kont inwestycyjnych (np. „Srebro”) — raz dziennie
-    coached_at = 0.0  # motywacja Multisport (Strava) — co 2 godziny, w godzinach 8–22
+    coached_on = None  # motywacja Multisport (Strava) — raz dziennie, rano razem z przypomnieniami
     while True:
         now = datetime.now(core.cfg.tz)
-        if 8 <= now.hour < 22 and now.timestamp() - coached_at > 2 * 3600:
-            coached_at = now.timestamp()
+        if coached_on != now.date() and now.hour >= core.cfg.reminder_hour:
             try:
                 for reply in await multisport.coach(core):
                     for notify in notifiers:
                         await notify(reply)
-            except Exception as e:  # Strava niedostępna / niepołączona — spróbujemy za 2 h
+                coached_on = now.date()
+            except Exception as e:  # Strava chwilowo niedostępna — ponowi przy następnym obrocie pętli
                 log.warning("Multisport coach: %r", e)
         try:
             if now.hour >= core.cfg.reminder_hour:
