@@ -472,7 +472,7 @@ async def forecast_web_transfer():
                     note="odkładam na awaryjne", transfer_to="awar")])
 
     core = Core(Config())
-    core.wallet, core.parser = FakeWallet(), TransferParser()
+    core.wallet, core.parser, core.fx = FakeWallet(), TransferParser(), FakeFX()
     core.today = lambda: dt.date(2026, 10, 4)
 
     f = await forecast.build(core)
@@ -548,3 +548,49 @@ async def balance_fix():
 
 
 asyncio.run(balance_fix())
+
+
+async def investments():
+    """Inwestycje: dodanie (szkic → ✅), wycena w PLN, zysk, w prognozie jako majątek."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from bot import forecast
+    from bot.parser import InvestmentDraft, InvestmentResult
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"), SCHEDULE_FILE="config/schedule.yaml",
+                      FORECAST_FILE="config/forecast.yaml")
+
+    class InvParser(FakeParser):
+        async def parse_investment(self, text, today):
+            return InvestmentResult(question=None, investment=InvestmentDraft(
+                name="Srebro", kind="metal", symbol="xag", quantity=2, unit="oz", cost_pln=400.0, bought="2024"))
+
+    core = Core(Config())
+    core.wallet, core.parser, core.fx = FakeWallet(), InvParser(), FakeFX()
+    core.today = lambda: dt.date(2026, 10, 4)
+
+    async def fake_quote(h):
+        assert h.symbol == "XAG"
+        return 60.52, "USD"
+    core.investments._quote = fake_quote
+
+    assert "/inwestycja" in (await core.investments_list()).text  # pusto → instrukcja
+    draft = await core.investment_add("tg:1", "srebro 2 uncje 2024 za 400 zł")
+    print(draft.text)
+    assert "62,2 g" in draft.text and draft.buttons[0][1].startswith("ia:")
+    added = await core.handle_callback("tg:1", draft.buttons[0][1])
+    print(added.text)
+    lst = await core.investments_list()
+    print(lst.text)
+    # 60,52 USD × 3,8881 = 235,31 zł/oz × 2 = 470,62 zł; zysk 70,62 zł (+17,7%)
+    assert "470,62 PLN" in lst.text and "+70,62 PLN (+17,7%)" in lst.text
+    f = await forecast.build(core)
+    assert f["worth"]["investments"] == 470.62
+    assert "Majątek netto" in forecast.summary_text(f)
+    assert (await core.handle_callback("tg:1", f"iry:{lst.buttons[0][1][3:]}")).text.startswith("🗑")
+    assert not core.investments.items
+    print("\nOK investments")
+
+
+asyncio.run(investments())

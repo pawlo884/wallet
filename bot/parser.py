@@ -60,6 +60,30 @@ class PlanResult(BaseModel):
     question: str | None = Field(description="Gdy brakuje kwoty lub nie wiadomo co to — pytanie po polsku")
 
 
+class InvestmentDraft(BaseModel):
+    name: str = Field(description="Nazwa po polsku, np. 'Srebro', 'Złoto', 'ETF VWCE'")
+    kind: Literal["metal", "ticker"]
+    symbol: str = Field(description="Metal: XAG/XAU/XPT/XPD. Inaczej ticker z Yahoo Finance, np. VWCE.DE, IWDA.AS, CDR.WA")
+    quantity: float = Field(description="Metal: w uncjach trojańskich (1 oz = 31,1035 g). Ticker: liczba sztuk")
+    unit: str = Field(description="'oz' dla metali, 'szt.' dla tickerów")
+    cost_pln: float | None = Field(description="Łączny koszt zakupu w PLN, jeśli podany; inaczej null")
+    bought: str | None = Field(description="Kiedy kupione (rok lub data), jeśli podane; inaczej null")
+
+
+class InvestmentResult(BaseModel):
+    investment: InvestmentDraft | None
+    question: str | None = Field(description="Gdy nie wiadomo co to lub ile — pytanie po polsku")
+
+
+INVESTMENT_INSTRUCTIONS = """Tym razem użytkownik dodaje INWESTYCJĘ do śledzenia (nie transakcję), np.
+"srebro 2 uncje kupione w 2024 za 600 zł", "złoto 10 g", "VWCE 3 sztuki", "Orlen 20 akcji".
+- Metale: kind=metal, symbol XAG (srebro), XAU (złoto), XPT (platyna), XPD (pallad); quantity w uncjach
+  trojańskich — gramy przelicz (1 oz = 31,1035 g); "uncja"/"oz" bez dopisku = uncja trojańska.
+- ETF/akcje: kind=ticker, symbol w formacie Yahoo Finance (giełda warszawska: .WA, Xetra: .DE).
+- cost_pln: tylko gdy podano cenę zakupu (przelicz na łączną kwotę w PLN; gdy podano za sztukę — pomnóż).
+"""
+
+
 PLAN_INSTRUCTIONS = """Tym razem NIE zapisujesz transakcji, tylko definiujesz PŁATNOŚĆ CYKLICZNĄ
 (stałe zlecenie, abonament, rata, pensja), np. "netflix 49 co miesiąc 15-go",
 "czynsz 1800 10-tego", "OC 1200 co rok 20 marca", "rata 450 do lutego", "pensja 6200 10-go".
@@ -210,6 +234,17 @@ class RecordParser:
         )
         if response.stop_reason == "refusal" or response.parsed_output is None:
             return ParseResult(records=[], amends=False, question="Nie udało się odczytać wyciągu.")
+        return response.parsed_output
+
+    async def parse_investment(self, text: str, today: date) -> InvestmentResult:
+        response = await self._client.messages.parse(
+            model=self._model,
+            max_tokens=1000,
+            messages=[{"role": "user", "content": f"{INVESTMENT_INSTRUCTIONS}\nDzisiaj jest {today.isoformat()}.\n\nWiadomość: {text}"}],
+            output_format=InvestmentResult,
+        )
+        if response.stop_reason == "refusal" or response.parsed_output is None:
+            return InvestmentResult(investment=None, question="Nie zrozumiałem. Napisz np. „srebro 2 uncje kupione 2024 za 600 zł”.")
         return response.parsed_output
 
     async def parse_plan(self, text: str, today: date, catalog_prompt: str) -> PlanResult:

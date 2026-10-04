@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from .config import Config
 from .debts import Debts, parse_debt_command
 from .fx import FX, FXError, resolve_code
+from .investments import Holding, Investments
 from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
@@ -70,11 +71,13 @@ class Core:
         # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
         self._saved: dict[str, tuple[str, list[str], str | None]] = {}
         self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
+        self._inv_drafts: dict[str, tuple[str, Holding]] = {}
         self._fix_drafts: dict[str, tuple] = {}  # korekty salda czekające na wybór (wpis / saldo początkowe)
         self.fx = FX()
         self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
         self.reconciler = Reconciler(self)
         self.debts = Debts(self)
+        self.investments = Investments(self)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
@@ -266,6 +269,8 @@ class Core:
         action, _, key = data.partition(":")
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
+        if action in ("ia", "in", "ir", "iry"):
+            return await self._inv_callback(owner, action, key)
         if action in ("kr", "ki", "kn"):
             return await self._fix_callback(owner, action, key)
         if action == "dl":
@@ -655,6 +660,76 @@ class Core:
             f"Kurs NBP {fmt_rate(ratio)} z {day:%d.%m.%Y}"
         )
 
+    # ---------- inwestycje (/inwestycja, /inwestycje) ----------
+
+    async def investment_add(self, owner: str, text: str) -> Reply:
+        if not text.strip():
+            return Reply(
+                "📈 Dodaj inwestycję, np.:\n• `/inwestycja srebro 2 uncje kupione 2024 za 600 zł`\n"
+                "• `/inwestycja złoto 10 g`\n• `/inwestycja VWCE 3 sztuki za 1500 zł`\nPodgląd: `/inwestycje`"
+            )
+        result = await self.parser.parse_investment(text, self.today())
+        d = result.investment
+        if not d or d.quantity <= 0:
+            return Reply(result.question or "Nie zrozumiałem — podaj co i ile, np. „srebro 2 uncje”.")
+        h = Holding(id="", name=d.name.strip()[:40], kind=d.kind, symbol=d.symbol.strip().upper() if d.kind == "metal" else d.symbol.strip(),
+                    quantity=round(d.quantity, 6), unit=d.unit or ("oz" if d.kind == "metal" else "szt."),
+                    cost=round(d.cost_pln, 2) if d.cost_pln else None, bought=d.bought)
+        key = secrets.token_urlsafe(6)
+        self._inv_drafts[key] = (owner, h)
+        lines = [f"📈 *Nowa inwestycja:* {h.name}", f"{h.quantity:g} {h.unit} · notowanie: {h.symbol}"]
+        if h.kind == "metal" and h.unit == "oz":
+            lines[-1] += f" (= {h.quantity * 31.1035:.1f} g)".replace(".", ",")
+        lines.append(f"Koszt zakupu: {fmt_money(h.cost, 'PLN')}" if h.cost else "Koszt zakupu: nie podano (bez zysku/straty)")
+        if h.bought:
+            lines.append(f"Kupione: {h.bought}")
+        return Reply("\n".join(lines), [("✅ Dodaj", f"ia:{key}"), ("❌ Anuluj", f"in:{key}")])
+
+    async def investments_list(self) -> Reply:
+        rows = await self.investments.valuate()
+        if not rows:
+            return await self.investment_add("", "")
+        lines, total, cost_known, cost_sum = ["📈 *Inwestycje:*"], 0.0, 0.0, 0.0
+        for r in rows:
+            head = f"• *{r['name']}* {r['quantity']:g} {r['unit']}"
+            if r["value"] is None:
+                lines.append(f"{head} — {r['error']}")
+                continue
+            total += r["value"]
+            line = f"{head}: *{fmt_money(r['value'], 'PLN')}* ({fmt_money(r['unit_pln'], 'PLN')}/{r['unit']})"
+            if r.get("gain") is not None:
+                cost_known += r["value"]
+                cost_sum += r["cost"]
+                line += f"\n   zakup {fmt_money(r['cost'], 'PLN')} → {'+' if r['gain'] >= 0 else ''}{fmt_money(r['gain'], 'PLN')} ({f"{r['gain_pct']:+.1f}".replace(".", ",")}%)"
+            elif r.get("bought"):
+                line += f"\n   kupione {r['bought']} — podaj koszt zakupu, żeby liczyć zysk"
+            lines.append(line)
+        lines.append(f"\nRazem: *{fmt_money(total, 'PLN')}*")
+        if cost_sum:
+            g = cost_known - cost_sum
+            lines.append(f"Zysk na pozycjach z ceną zakupu: {'+' if g >= 0 else ''}{fmt_money(g, 'PLN')}")
+        lines.append("_Ceny: gold-api.com (metale), Yahoo Finance (ETF/akcje), kurs NBP._")
+        return Reply("\n".join(lines), [(f"🗑 {r['name']}", f"ir:{r['id']}") for r in rows], column=True)
+
+    async def _inv_callback(self, owner: str, action: str, key: str) -> Reply:
+        if action in ("ia", "in"):
+            draft = self._inv_drafts.pop(key, None)
+            if not draft or draft[0] != owner:
+                return Reply("Ten szkic wygasł albo został już obsłużony.")
+            if action == "in":
+                return Reply("❌ Anulowano.")
+            h = self.investments.add(draft[1])
+            rows = [r for r in await self.investments.valuate() if r["id"] == h.id]
+            value = f" — dziś warte *{fmt_money(rows[0]['value'], 'PLN')}*" if rows and rows[0]["value"] else ""
+            return Reply(f"✅ Dodano: {h.name} {h.quantity:g} {h.unit}{value}. Podgląd: `/inwestycje`.")
+        h = self.investments.items.get(key)
+        if not h:
+            return Reply("Tej inwestycji już nie ma.")
+        if action == "ir":
+            return Reply(f"Usunąć *{h.name}* ({h.quantity:g} {h.unit}) z listy?", [("🗑 Tak", f"iry:{key}"), ("Zostaw", "keep:")])
+        self.investments.remove(key)
+        return Reply(f"🗑 Usunięto: {h.name}")
+
     # ---------- korekta salda (/korekta) ----------
 
     async def balance_fix(self, owner: str, text: str) -> Reply:
@@ -731,6 +806,7 @@ class Core:
     async def close(self) -> None:
         await self.wallet.close()
         await self.fx.close()
+        await self.investments.close()
 
 
 HELP = """👋 Zapisuję wydatki i przychody do Wallet.
@@ -749,13 +825,14 @@ Pamiętam ostatnie ~30 min rozmowy, więc możesz poprawiać:
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
+Inwestycje: `/inwestycja srebro 2 uncje` · wycena: `/inwestycje`
 Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
 Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
 
-Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · kurs · wyciag · korekta · odswiez · pomoc"""
+Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · kurs · wyciag · korekta · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

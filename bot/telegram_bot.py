@@ -28,6 +28,8 @@ COMMANDS = [
     ("plan", "Nowa płatność cykliczna, np. /plan netflix 49 15-go"),
     ("dlugi", "Długi i ile zostało do spłaty"),
     ("dlug", "Nowy dług, np. /dlug A6 9100"),
+    ("inwestycje", "Wycena inwestycji (srebro, złoto, ETF)"),
+    ("inwestycja", "Dodaj inwestycję, np. /inwestycja srebro 2 uncje"),
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
     ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
@@ -132,6 +134,13 @@ def build(core: Core) -> Application:
 
     app.add_handler(CommandHandler("korekta", on_korekta, filters=user_filter))
 
+    async def on_inwestycja(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+        await send(update, await core.investment_add(f"tg:{update.effective_user.id}", " ".join(ctx.args or [])))
+
+    app.add_handler(CommandHandler("inwestycja", on_inwestycja, filters=user_filter))
+    app.add_handler(CommandHandler("inwestycje", cmd(core.investments_list), filters=user_filter))
+
     async def on_dlug(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, await core.debt_add(" ".join(ctx.args or [])))
 
@@ -188,7 +197,7 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn|ia|in|ir|iry):"))
     return app
 
 

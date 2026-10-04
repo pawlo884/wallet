@@ -187,8 +187,28 @@ async def build(core: "Core") -> dict:
                                       if s["reach"] else f"Przy {_z(s['monthly'])}/mies. cel {_z(s['target'])} poza horyzontem.")
                              + (f" Wpłaty od: {_m(s['since'])}." if s["since"] else "")})
 
+    # --- majątek: salda kont (EUR po kursie NBP) + inwestycje − długi ---
+    accounts_pln = 0.0
+    for acc in core._accounts.values():
+        if acc.get("excludeFromStats"):
+            continue
+        bal = float((acc.get("balance") or {}).get("currentBalance", 0))
+        cur = acc.get("currencyCode") or "PLN"
+        if cur != "PLN" and bal:
+            try:
+                bal, _, _ = await core.fx.convert(bal, cur, "PLN", today)
+            except Exception:
+                continue
+        accounts_pln += bal
+    invest = await core.investments.valuate()
+    invest_total = round(sum(i["value"] or 0 for i in invest), 2)
+    debt_now = round(sum(d["now"] for d in debts), 2)
+
     return {
         "generated": today.isoformat(),
+        "investments": invest,
+        "worth": {"accounts": round(accounts_pln, 2), "investments": invest_total, "debts": debt_now,
+                  "net": round(accounts_pln + invest_total - debt_now, 2)},
         "base": base_key,
         "living": living,
         "rows": rows,
@@ -216,6 +236,10 @@ def summary_text(f: dict, url: str = "") -> str:
         f"(widełki {fmt_money(min(rows[-1]['cum_' + k] for k in f['living']), cur)} … {fmt_money(max(rows[-1]['cum_' + k] for k in f['living']), cur)})",
         f"Długi: {fmt_money(f['totals']['debt_now'], cur)} → {fmt_money(f['totals']['debt_end'], cur)}",
     ]
+    w = f.get("worth")
+    if w:
+        lines.append(f"Majątek netto: konta {fmt_money(w['accounts'], cur)} + inwestycje {fmt_money(w['investments'], cur)}"
+                     f" − długi {fmt_money(w['debts'], cur)} = *{fmt_money(w['net'], cur)}*")
     if f["savings"]:
         lines.append("Oszczędności: " + " · ".join(f"{s['name']} {fmt_money(s['balance'], cur)}/{fmt_money(s['target'], cur)}" for s in f["savings"]))
     if f["insights"]:

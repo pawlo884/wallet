@@ -126,6 +126,8 @@ document.getElementById("eyebrow").textContent = `Stan na ${DATA.generated} · $
   add("Typowy miesiąc", (typical > 0 ? "+" : "") + zl(typical) + " zł", "przed oszczędnościami");
   if (net(worst) < 0) add(longm(worst.month), zl(net(worst)) + " zł", worst.yearly.map(y => esc(y.name)).join(" + ") || "najsłabszy miesiąc", "warn");
   else add("Na koniec okresu", "+" + zl(R[N - 1]["cum_" + B]) + " zł", "narastająco");
+  const W = DATA.worth;
+  if (W) add("Majątek netto", zl(W.net) + " zł", `konta ${zl(W.accounts)} + inwestycje ${zl(W.investments)} − długi ${zl(W.debts)}`);
 })();
 
 // Tabela
@@ -215,6 +217,24 @@ function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(r
       <div class="meter"><span style="width:${pct}%"></span></div>
       <p>Wpłata ${zl(s.monthly)} zł/mies. → ${zl(end)} zł na koniec okresu${s.reach ? `, cel w ${longm(s.reach)}` : ""}.</p>`));
   });
+})();
+
+// Inwestycje (karty obok oszczędności)
+(() => {
+  const I = DATA.investments || [], box = document.getElementById("savings");
+  if (!I.length) return;
+  if (!box.isConnected) {  // sekcja oszczędności usunięta — dokładamy własną
+    const sec = h("section", "", "<h2>Inwestycje</h2>"); const c = h("div", "cards"); sec.appendChild(c);
+    document.querySelector("main").insertBefore(sec, document.getElementById("insights").parentElement); I.forEach(i => c.appendChild(card(i))); return;
+  }
+  document.querySelector("#savingsSection h2").textContent = "Oszczędności i inwestycje";
+  I.forEach(i => box.appendChild(card(i)));
+  function card(i) {
+    const gain = i.gain != null ? `<p>Zakup ${zl(i.cost, 2)} zł → <span class="${i.gain < 0 ? "neg" : "pos"}">${i.gain > 0 ? "+" : ""}${zl(i.gain, 2)} zł (${i.gain_pct > 0 ? "+" : ""}${String(i.gain_pct).replace(".", ",")}%)</span></p>` : (i.bought ? `<p>Kupione ${esc(i.bought)}.</p>` : "");
+    return h("div", "card", `<span class="chip info">inwestycja · ${esc(i.symbol)}</span><h3>${esc(i.name)} · ${String(i.quantity).replace(".", ",")} ${esc(i.unit)}</h3>
+      <div class="num" style="font-size:20px">${i.value != null ? zl(i.value, 2) + " zł" : esc(i.error || "brak ceny")}</div>
+      ${i.unit_pln ? `<p>${zl(i.unit_pln, 2)} zł / ${esc(i.unit)}</p>` : ""}${gain}`);
+  }
 })();
 
 // Wnioski

@@ -33,6 +33,8 @@ domeny ani HTTPS** na VPS.
 | `/dlugi` | ile zostało do spłaty (pasek postępu), usuwanie z listy |
 | `/prognoza` | prognoza na 12 miesięcy (przepływy, długi, oszczędności, wnioski) + link do strony z wykresami |
 | `/korekta [konto] <kwota>` | saldo jak w banku: różnica jako wpis „Korekta salda” albo zmiana salda początkowego |
+| `/inwestycja <opis>` | nowa inwestycja, np. `/inwestycja srebro 2 uncje kupione 2024 za 600 zł` |
+| `/inwestycje` | wycena na żywo w PLN (metale: gold-api.com, ETF/akcje: Yahoo, kurs NBP), zysk/strata |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
