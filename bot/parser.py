@@ -92,7 +92,9 @@ Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:
   wiadomością w jedną transakcję.
 - Poprawka szkicu/zapisanego rekordu ("zmień na 45", "kategoria restauracje", "to było wczoraj",
   "nie Biedronka tylko Lidl") → amends=true i PEŁNA poprawiona lista rekordów tamtej transakcji.
-- Nowa transakcja ("i jeszcze parking 12") → amends=false, tylko nowe rekordy.
+- Nowa transakcja ("i jeszcze parking 12") → amends=false i records zawiera WYŁĄCZNIE transakcje
+  z bieżącej wiadomości. Nigdy nie powtarzaj rekordów z wcześniejszych szkiców — one nadal czekają
+  osobno na zatwierdzenie i zostałyby zapisane podwójnie.
 
 KONTA (id | nazwa | waluta):
 {accounts}

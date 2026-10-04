@@ -179,6 +179,13 @@ class Core:
         except Exception as e:  # brak kursu (FXError) albo NBP niedostępne
             log.warning("Przeliczenie waluty: %s", e)
             return Reply(f"⚠️ Nie mogę przeliczyć waluty: {e}")
+        if not result.amends:
+            # Bezpiecznik: model czasem powtarza rekordy z otwartego szkicu — zapisałyby się dwa razy.
+            # Gdy odpadłoby wszystko (np. „jeszcze jedna kawa 14”), zostawiamy jak jest.
+            last = self._drafts.get(self._last_draft.get(owner, ""))
+            if last and last.owner == owner:
+                seen = {self._fingerprint(r) for r in last.records}
+                records = [r for r in records if self._fingerprint(r) not in seen] or records
         self._cleanup()
 
         # Poprawka: zastępuje otwarty szkic albo (przez „Zapisz poprawkę”) ostatnio zapisane rekordy.
@@ -289,6 +296,10 @@ class Core:
         r.date = min(d, today).isoformat()
         r.amount = abs(r.amount)
         return r
+
+    @staticmethod
+    def _fingerprint(r: ParsedRecord) -> tuple:
+        return (r.type, round(r.amount, 2), r.category_id, (r.counterparty or "").lower(), r.date)
 
     async def _convert(self, r: ParsedRecord) -> None:
         """Kwota w obcej walucie → waluta konta po kursie NBP z dnia transakcji (info w notatce)."""

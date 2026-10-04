@@ -252,6 +252,17 @@ async def memory_and_fx():
     print(done.text)
     assert core.wallet.deleted == ["r0"] and core.wallet.created[-1]["amount"]["value"] == -97.2
 
+    # model powtarza rekord z otwartego szkicu przy nowej transakcji → odfiltrowany
+    kawa = rec(amount=14, type="expense", category_id="food", account_id="pln", date="2026-10-04")
+    core.parser.script = [
+        ParseResult(records=[anthropic15], amends=False, question=None),
+        ParseResult(records=[anthropic15, kawa], amends=False, question=None),
+    ]
+    await core.handle_message("tg:1", "anthropic 15$", [])
+    r5 = await core.handle_message("tg:1", "i jeszcze kawa 14", [])
+    print(r5.text)
+    assert "Anthropic" not in r5.text and "−14,00 PLN" in r5.text
+
     print((await core.fx_quote("100 eur")).text)
     print((await core.fx_quote("")).text)
     assert "437,45 PLN" in (await core.fx_quote("100 eur")).text

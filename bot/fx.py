@@ -44,7 +44,7 @@ class FX:
         """Kurs średni 1 {code} w PLN obowiązujący w dniu `on` (ostatnia tabela ≤ on)."""
         code = code.upper()
         if code == "PLN":
-            return 1.0, on
+            return 1.0, date.min  # bez tabeli — w convert() liczy się data drugiej waluty
         if (code, on) in self._cache:
             return self._cache[(code, on)]
         frm = on - timedelta(days=10)  # weekendy i święta — bierzemy ostatni dostępny dzień
