@@ -32,6 +32,7 @@ domeny ani HTTPS** na VPS.
 | `/dlug <nazwa> <kwota>` | śledzenie długu bez stałych rat, np. `/dlug A6 9100` |
 | `/dlugi` | ile zostało do spłaty (pasek postępu), usuwanie z listy |
 | `/prognoza` | prognoza na 12 miesięcy (przepływy, długi, oszczędności, wnioski) + link do strony z wykresami |
+| `/korekta [konto] <kwota>` | saldo jak w banku: różnica jako wpis „Korekta salda” albo zmiana salda początkowego |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 

@@ -507,3 +507,44 @@ async def forecast_web_transfer():
 
 
 asyncio.run(forecast_web_transfer())
+
+
+async def balance_fix():
+    """/korekta: różnica jako wpis albo zmiana salda początkowego."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"))
+
+    class FixWallet(FakeWallet):
+        def __init__(self):
+            super().__init__()
+            self.patched = []
+        async def accounts(self):
+            return [{**a, "balance": {"currentBalance": -10.5, "initial": 0}} if a["id"] == "pln" else a for a in ACC]
+        async def set_initial_balance(self, account_id, initial):
+            self.patched.append((account_id, initial))
+
+    core = Core(Config())
+    core.wallet, core.parser = FixWallet(), FakeParser()
+    core.today = lambda: dt.date(2026, 10, 4)
+    await core.refresh_catalog(force=True)
+
+    assert "Podaj" in (await core.balance_fix("tg:1", "")).text
+    r = await core.balance_fix("tg:1", "2 345,67")
+    print(r.text)
+    assert "Różnica: *+2 356,17 PLN*" in r.text and [b[1][:3] for b in r.buttons] == ["kr:", "ki:", "kn:"]
+    out = await core.handle_callback("tg:1", r.buttons[1][1])  # saldo początkowe
+    print(out.text)
+    assert core.wallet.patched == [("pln", 2356.17)]
+
+    r = await core.balance_fix("tg:1", "Euro 300")
+    out = await core.handle_callback("tg:1", r.buttons[0][1])  # wpis
+    sent = core.wallet.created[-1]
+    assert sent["accountId"] == "eur" and sent["amount"]["value"] == -25 and "Korekta salda" in sent["note"]
+    assert "nie znam" in (await core.balance_fix("tg:1", "xyz 10")).text.lower()
+    print("\nOK balance_fix")
+
+
+asyncio.run(balance_fix())

@@ -70,6 +70,7 @@ class Core:
         # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
         self._saved: dict[str, tuple[str, list[str], str | None]] = {}
         self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
+        self._fix_drafts: dict[str, tuple] = {}  # korekty salda czekające na wybór (wpis / saldo początkowe)
         self.fx = FX()
         self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
         self.reconciler = Reconciler(self)
@@ -265,6 +266,8 @@ class Core:
         action, _, key = data.partition(":")
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
+        if action in ("kr", "ki", "kn"):
+            return await self._fix_callback(owner, action, key)
         if action == "dl":
             debt = self.debts.items.get(key)
             if not debt:
@@ -652,6 +655,67 @@ class Core:
             f"Kurs NBP {fmt_rate(ratio)} z {day:%d.%m.%Y}"
         )
 
+    # ---------- korekta salda (/korekta) ----------
+
+    async def balance_fix(self, owner: str, text: str) -> Reply:
+        """„/korekta 2345,67” (konto domyślne) albo „/korekta awaryjne 500” — ile naprawdę jest na koncie."""
+        m = re.fullmatch(r"\s*(.*?)\s*(-?\d[\d  ]*(?:[.,]\d{1,2})?)\s*(zł|zl|pln|eur|€)?\s*", text or "", re.I)
+        if not m:
+            return Reply(
+                "⚖️ Podaj, ile *naprawdę* masz na koncie (z aplikacji banku):\n"
+                "• `/korekta 2345,67` — konto domyślne\n• `/korekta awaryjne 500` — inne konto"
+            )
+        name, actual = m.group(1).strip(), float(m.group(2).replace(" ", "").replace(" ", "").replace(",", "."))
+        try:
+            accounts = {a["id"]: a for a in await self.wallet.accounts()}  # świeże salda, bez cache
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+        acc = None
+        if name:
+            low = name.lower()
+            acc = next((a for a in accounts.values() if a["name"].lower() == low), None) or next(
+                (a for a in accounts.values() if a["name"].lower().startswith(low[:4])), None)
+            if not acc:
+                return Reply(f"Nie znam konta „{name}”. Konta: " + ", ".join(a["name"] for a in accounts.values()))
+        acc = acc or accounts.get(self._default_account_id) or next(iter(accounts.values()))
+        bal = acc.get("balance") or {}
+        current, cur = float(bal.get("currentBalance", 0)), acc.get("currencyCode", "")
+        diff = round(actual - current, 2)
+        if abs(diff) < 0.01:
+            return Reply(f"✅ *{acc['name']}*: {fmt_money(current, cur)} — zgadza się z bankiem.")
+        key = secrets.token_urlsafe(6)
+        self._fix_drafts[key] = (owner, acc["id"], diff, actual, float(bal.get("initial", 0)), cur, acc["name"])
+        return Reply(
+            f"⚖️ *{acc['name']}*\nW Wallet: {fmt_money(current, cur)}\nW banku: {fmt_money(actual, cur)}\n"
+            f"Różnica: *{'+' if diff > 0 else ''}{fmt_money(diff, cur)}*\n\n"
+            "📝 *Wpis* — drobny rozjazd (zapomniany paragon, opłata); liczy się w statystykach.\n"
+            "⚖️ *Saldo początkowe* — punkt startowy konta (np. pierwsze ustawienie); statystyki bez zmian.",
+            [("📝 Zapisz jako wpis", f"kr:{key}"), ("⚖️ Saldo początkowe", f"ki:{key}"), ("❌ Anuluj", f"kn:{key}")],
+        )
+
+    async def _fix_callback(self, owner: str, action: str, key: str) -> Reply:
+        draft = self._fix_drafts.pop(key, None)
+        if not draft or draft[0] != owner:
+            return Reply("Ta korekta wygasła albo została już obsłużona.")
+        _, acc_id, diff, actual, initial, cur, name = draft
+        if action == "kn":
+            return Reply("❌ Anulowano.")
+        if action == "ki":
+            try:
+                await self.wallet.set_initial_balance(acc_id, initial + diff)
+            except WalletError as e:
+                return Reply(f"⚠️ {e}")
+            return Reply(f"⚖️ *{name}*: saldo początkowe {fmt_money(initial, cur)} → {fmt_money(initial + diff, cur)}. "
+                         f"Saldo teraz {fmt_money(actual, cur)}.")
+        await self.refresh_catalog()
+        r = ParsedRecord(
+            amount=abs(diff), currency=None, type="income" if diff > 0 else "expense",
+            category_id=UNKNOWN_INCOME if diff > 0 else UNKNOWN_EXPENSE, account_id=acc_id,
+            date=self.today().isoformat(), counterparty=None,
+            note=f"Korekta salda (bank: {fmt_money(actual, cur)})",
+        )
+        return await self.save_records(owner, [r])
+
     async def forecast(self) -> Reply:
         from . import forecast
 
@@ -689,7 +753,9 @@ Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
-Komendy: saldo · miesiac · zaplanowane · plan · plany · dlug · dlugi · kurs · wyciag · odswiez · pomoc"""
+Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
+
+Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · kurs · wyciag · korekta · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

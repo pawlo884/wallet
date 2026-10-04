@@ -69,6 +69,15 @@ class WalletAPI:
         params = {"recordDate": [f"gte.{date_from}", f"lt.{date_to}"], **filters}
         return await self._paged("/v1/api/records", "records", params)
 
+    async def set_initial_balance(self, account_id: str, initial: float) -> None:
+        data = await self._request(
+            "PATCH", "/v1/api/accounts", params={"returnData": "false"},
+            json=[{"id": account_id, "initialBalance": round(initial, 2)}],
+        )
+        res = (data.get("results") or [{}])[0]
+        if not res.get("success"):
+            raise WalletError(res.get("error") or f"Nie udało się zmienić salda: {data}")
+
     async def labels(self) -> list[dict]:
         return await self._paged("/v1/api/labels", "labels", {"archived": "false"})
 

@@ -30,6 +30,7 @@ COMMANDS = [
     ("dlug", "Nowy dług, np. /dlug A6 9100"),
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
+    ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
     ("odswiez", "Odśwież konta i kategorie"),
     ("pomoc", "Jak korzystać z bota"),
 ]
@@ -126,6 +127,11 @@ def build(core: Core) -> Application:
 
     app.add_handler(CommandHandler("kurs", on_kurs, filters=user_filter))
 
+    async def on_korekta(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await send(update, await core.balance_fix(f"tg:{update.effective_user.id}", " ".join(ctx.args or [])))
+
+    app.add_handler(CommandHandler("korekta", on_korekta, filters=user_filter))
+
     async def on_dlug(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, await core.debt_add(" ".join(ctx.args or [])))
 
@@ -182,7 +188,7 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn):"))
     return app
 
 
