@@ -35,7 +35,7 @@ class FakeWallet:
 
 
 def rec(**kw):
-    base = dict(currency=None, counterparty=None, note=None)
+    base = dict(currency=None, counterparty=None, note="")
     return ParsedRecord(**{**base, **kw})
 
 
@@ -77,6 +77,7 @@ async def main():
     c = core.wallet.created
     assert c[0]["amount"]["value"] == -54.3 and c[0]["counterParty"] == "Biedronka"
     assert c[1]["categoryId"] == UNKNOWN_EXPENSE and c[1]["accountId"] == "pln" and c[1]["amount"]["value"] == -20
+    assert c[0]["note"] == "biedronka 54,30", "pusta notatka → treść wiadomości"
     undo = await core.handle_callback("tg:1", saved.buttons[0][1])
     print(undo.text); assert core.wallet.deleted == ["r0", "r1"]
     print((await core.balances()).text)

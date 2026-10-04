@@ -173,6 +173,9 @@ class Core:
             return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
 
         records = [self._sanitize(r) for r in result.records]
+        for r in records:  # notatka zawsze — żeby po miesiącach było wiadomo, na co to poszło
+            if not (r.note or "").strip():
+                r.note = (text.strip() or "z paragonu")[:120]
         try:
             for r in records:
                 await self._convert(r)

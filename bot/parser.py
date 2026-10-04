@@ -18,7 +18,10 @@ class ParsedRecord(BaseModel):
     account_id: str = Field(description="ID konta dokładnie z listy")
     date: str = Field(description="Data transakcji YYYY-MM-DD")
     counterparty: str | None = Field(description="Sklep / płatnik / odbiorca, jeśli znany")
-    note: str | None = Field(description="Krótka notatka, jeśli wnosi coś ponad kategorię")
+    note: str = Field(
+        description="ZAWSZE: krótki opis po polsku, na co konkretnie poszły pieniądze "
+        "(np. 'doładowanie API Anthropic', 'kawa i ciastko', 'mleko, chleb, karma dla psa')"
+    )
 
 
 class ParseResult(BaseModel):
@@ -84,7 +87,12 @@ Zasady:
 - Daty względne ("wczoraj", "w piątek") licz od dzisiejszej daty podanej w wiadomości.
   Brak daty = dzisiaj. Nigdy data w przyszłości.
 - counterparty: nazwa sklepu/firmy/osoby z wiadomości lub paragonu, w naturalnej formie ("Biedronka").
-- note: tylko jeśli dodaje informację (np. "prezent dla mamy"); inaczej null.
+- note: ZAWSZE wypełnij. To ma pozwolić użytkownikowi za kilka miesięcy przypomnieć sobie,
+  na co dokładnie poszły pieniądze — kategoria i sklep tego nie mówią. 2–8 słów, po polsku,
+  konkretnie: co kupione / za co zapłacone / dla kogo / po co, np. "doładowanie API Anthropic",
+  "obiad z Karoliną", "paliwo do A6", "prezent dla mamy". Zachowaj szczegóły z wiadomości
+  użytkownika. Przy paragonie wymień główne pozycje (max ~6), np. "mleko, chleb, masło, karma dla psa".
+  Gdy wiadomość nic nie mówi ponad sklep ("biedronka 54,30"), opisz ogólnie: "zakupy spożywcze".
 - Gdy wiadomość nie opisuje transakcji albo brak kwoty: records = [] i zadaj pytanie w question.
 
 Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:
