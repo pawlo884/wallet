@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field
 
 
 class ParsedRecord(BaseModel):
-    amount: float = Field(description="Kwota dodatnia, w walucie konta")
+    amount: float = Field(description="Kwota dodatnia, w walucie z pola currency (albo konta, gdy currency=null)")
+    currency: str | None = Field(
+        description="Kod ISO 4217 waluty kwoty, jeśli użytkownik/paragon podaje walutę (USD, EUR, ...); inaczej null"
+    )
     type: Literal["expense", "income"]
     category_id: str = Field(description="ID kategorii dokładnie z listy")
     account_id: str = Field(description="ID konta dokładnie z listy")
@@ -20,6 +23,10 @@ class ParsedRecord(BaseModel):
 
 class ParseResult(BaseModel):
     records: list[ParsedRecord]
+    amends: bool = Field(
+        description="true, gdy wiadomość poprawia/uzupełnia transakcję pokazaną wcześniej w rozmowie "
+        "(szkic lub zapisany rekord) — wtedy records to PEŁNA poprawiona wersja tamtej transakcji"
+    )
     question: str | None = Field(
         description="Jeśli nie da się ustalić transakcji (np. brak kwoty) — krótkie pytanie po polsku. Inaczej null."
     )
@@ -66,12 +73,26 @@ Zasady:
 - category_id i account_id wybieraj WYŁĄCZNIE z list poniżej. Wybierz najbardziej szczegółową
   pasującą kategorię. Jeśli nic nie pasuje, użyj kategorii "Unknown"/"Nieznane" odpowiedniego typu.
 - Konto: jeśli użytkownik go nie wskazał, użyj konta domyślnego. Waluta w wiadomości
-  (np. "20 euro", "€") wskazuje konto w tej walucie, jeśli takie istnieje.
+  (np. "20 euro", "€", "15$") wskazuje konto w tej walucie, jeśli takie istnieje.
+- Waluta: gdy kwota jest w walucie (USD, EUR, ...), wpisz ją do currency i podaj amount w TEJ walucie,
+  nawet jeśli nie ma konta w tej walucie — bot sam przeliczy po kursie NBP. Nie pytaj o kwotę w PLN.
+- Konta z listy to WYŁĄCZNIE pieniądze użytkownika. "Doładowanie/zasilenie konta" w zewnętrznej usłudze
+  (np. Anthropic, OpenAI, Steam, telefon na kartę, karta miejska) to zwykły WYDATEK na tę usługę
+  (counterparty = usługa), nie przelew między kontami.
+- Nie dopytuj, gdy znasz kwotę: kategorię, datę i konto wybierz sam najlepiej jak umiesz —
+  użytkownik i tak widzi szkic i może go poprawić.
 - Daty względne ("wczoraj", "w piątek") licz od dzisiejszej daty podanej w wiadomości.
   Brak daty = dzisiaj. Nigdy data w przyszłości.
 - counterparty: nazwa sklepu/firmy/osoby z wiadomości lub paragonu, w naturalnej formie ("Biedronka").
 - note: tylko jeśli dodaje informację (np. "prezent dla mamy"); inaczej null.
 - Gdy wiadomość nie opisuje transakcji albo brak kwoty: records = [] i zadaj pytanie w question.
+
+Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:
+- Odpowiedź na Twoje pytanie albo dopowiedzenie ("to wydatek", "15$", "wczoraj") łącz z wcześniejszą
+  wiadomością w jedną transakcję.
+- Poprawka szkicu/zapisanego rekordu ("zmień na 45", "kategoria restauracje", "to było wczoraj",
+  "nie Biedronka tylko Lidl") → amends=true i PEŁNA poprawiona lista rekordów tamtej transakcji.
+- Nowa transakcja ("i jeszcze parking 12") → amends=false, tylko nowe rekordy.
 
 KONTA (id | nazwa | waluta):
 {accounts}
@@ -94,7 +115,9 @@ class RecordParser:
         images: list[tuple[bytes, str]],
         today: date,
         catalog_prompt: str,
+        history: list[dict] | None = None,
     ) -> ParseResult:
+        """history: wcześniejsze tury [{"role": "user"|"assistant", "content": str}], od najstarszej."""
         content: list[dict] = [
             {
                 "type": "image",
@@ -118,11 +141,13 @@ class RecordParser:
             max_tokens=4000,
             # Katalog kont/kategorii zmienia się rzadko — stabilny prefiks do cache.
             system=[{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": content}],
+            messages=[*(history or []), {"role": "user", "content": content}],
             output_format=ParseResult,
         )
         if response.stop_reason == "refusal" or response.parsed_output is None:
-            return ParseResult(records=[], question="Nie udało mi się tego odczytać. Napisz np. „biedronka 54,30”.")
+            return ParseResult(
+                records=[], amends=False, question="Nie udało mi się tego odczytać. Napisz np. „biedronka 54,30”."
+            )
         return response.parsed_output
 
     async def parse_plan(self, text: str, today: date, catalog_prompt: str) -> PlanResult:

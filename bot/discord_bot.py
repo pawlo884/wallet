@@ -85,6 +85,9 @@ def build(core: Core) -> discord.Client:
         if command in commands:
             await send(message.channel, await commands[command](), reference=message)
             return
+        if command == "kurs":
+            await send(message.channel, await core.fx_quote(args), reference=message)
+            return
         if command == "plan":
             async with message.channel.typing():
                 reply = await core.plan_add(f"dc:{message.author.id}", args)

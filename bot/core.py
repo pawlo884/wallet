@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import secrets
 import time
 from collections import defaultdict
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
+from .fx import FX, FXError, resolve_code
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
 from .planned import Payment, Planned
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
@@ -17,6 +19,8 @@ log = logging.getLogger(__name__)
 
 CATALOG_TTL = 3600
 DRAFT_TTL = 24 * 3600
+HISTORY_TTL = 30 * 60  # pamięć rozmowy: ostatnie 30 min
+HISTORY_TURNS = 8  # i najwyżej tyle wiadomości (user + bot)
 
 
 @dataclass
@@ -33,6 +37,14 @@ class _Draft:
     owner: str
     records: list[ParsedRecord]
     created: float = field(default_factory=time.time)
+    replaces: str | None = None  # klucz zapisanych rekordów, które ta poprawka zastąpi
+
+
+_FX_NOTE = re.compile(r"\s*·?\s*−?[\d  ]+,\d{2} [A-Z]{3} po [\d,.]+ \(NBP [\d.]+\)")
+
+
+def fmt_rate(rate: float) -> str:
+    return f"{rate:.4f}".replace(".", ",")
 
 
 def fmt_money(value: float, currency: str) -> str:
@@ -55,6 +67,11 @@ class Core:
         # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
         self._saved: dict[str, tuple[str, list[str], str | None]] = {}
         self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
+        self.fx = FX()
+        # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
+        self._history: dict[str, list[tuple[float, str, str]]] = {}
+        self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
+        self._last_saved: dict[str, str] = {}  # właściciel → klucz ostatnio zapisanych rekordów
         self.planned = Planned(self)
 
     # ---------- katalog kont i kategorii ----------
@@ -117,30 +134,81 @@ class Core:
         cutoff = time.time() - DRAFT_TTL
         self._drafts = {k: d for k, d in self._drafts.items() if d.created > cutoff}
 
+    # ---------- pamięć rozmowy ----------
+
+    def remember(self, owner: str, role: str, text: str) -> None:
+        now = time.time()
+        h = [x for x in self._history.get(owner, []) if x[0] > now - HISTORY_TTL]
+        if h and h[-1][1] == role:  # kolejne wiadomości tej samej strony sklejamy (API wymaga naprzemienności)
+            h[-1] = (now, role, f"{h[-1][2]}\n{text}")
+        else:
+            h.append((now, role, text))
+        self._history[owner] = h[-HISTORY_TURNS:]
+
+    def _history_messages(self, owner: str) -> list[dict]:
+        h = [x for x in self._history.get(owner, []) if x[0] > time.time() - HISTORY_TTL]
+        while h and h[0][1] != "user":
+            h = h[1:]
+        if h and h[-1][1] == "user":  # bieżąca wiadomość dojdzie jako ostatnia tura użytkownika
+            h = h[:-1]
+        return [{"role": role, "content": text} for _, role, text in h]
+
     async def handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
+        reply = await self._handle_message(owner, text, images)
+        self.remember(owner, "user", ("[zdjęcie] " if images else "") + (text or ""))
+        self.remember(owner, "assistant", reply.text)
+        return reply
+
+    async def _handle_message(self, owner: str, text: str, images: list[tuple[bytes, str]]) -> Reply:
         if not images and (amount_reply := await self.planned.maybe_amount_reply(owner, text)):
             return amount_reply
         try:
             await self.refresh_catalog()
         except WalletError as e:
             return Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")
-        result = await self.parser.parse(text, images, self.today(), self._catalog_prompt)
+        result = await self.parser.parse(
+            text, images, self.today(), self._catalog_prompt, self._history_messages(owner)
+        )
         if not result.records:
             return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
 
         records = [self._sanitize(r) for r in result.records]
+        try:
+            for r in records:
+                await self._convert(r)
+        except Exception as e:  # brak kursu (FXError) albo NBP niedostępne
+            log.warning("Przeliczenie waluty: %s", e)
+            return Reply(f"⚠️ Nie mogę przeliczyć waluty: {e}")
         self._cleanup()
-        if not self.cfg.require_confirmation:
+
+        # Poprawka: zastępuje otwarty szkic albo (przez „Zapisz poprawkę”) ostatnio zapisane rekordy.
+        replaces = None
+        if result.amends:
+            last = self._last_draft.get(owner)
+            if last in self._drafts and self._drafts[last].owner == owner:
+                replaces = self._drafts.pop(last).replaces
+            elif (saved := self._last_saved.get(owner)) in self._saved and self._saved[saved][0] == owner:
+                replaces = saved
+
+        if not self.cfg.require_confirmation and not replaces:
             return await self.save_records(owner, records)
 
         key = secrets.token_urlsafe(6)
-        self._drafts[key] = _Draft(owner, records)
-        lines = ["📝 *Do zapisania:*"] + [self._describe(r) for r in records]
+        self._drafts[key] = _Draft(owner, records, replaces=replaces)
+        self._last_draft[owner] = key
+        header = "✏️ *Poprawka (zastąpi zapisany rekord):*" if replaces else "📝 *Do zapisania:*"
+        lines = [header] + [self._describe(r) for r in records]
         if result.question:
             lines.append(f"\n❓ {result.question}")
-        return Reply("\n".join(lines), [("✅ Zapisz", f"ok:{key}"), ("❌ Anuluj", f"no:{key}")])
+        ok_label = "✅ Zapisz poprawkę" if replaces else "✅ Zapisz"
+        return Reply("\n".join(lines), [(ok_label, f"ok:{key}"), ("❌ Anuluj", f"no:{key}")])
 
     async def handle_callback(self, owner: str, data: str) -> Reply:
+        reply = await self._handle_callback(owner, data)
+        self.remember(owner, "assistant", reply.text)  # żeby „zmień na 45” wiedziało, co zapisano
+        return reply
+
+    async def _handle_callback(self, owner: str, data: str) -> Reply:
         action, _, key = data.partition(":")
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
@@ -153,20 +221,33 @@ class Core:
             del self._drafts[key]
             if action == "no":
                 return Reply("❌ Anulowano.")
-            return await self.save_records(owner, draft.records)
+            prefix = ""
+            if draft.replaces:
+                if err := await self._undo(owner, draft.replaces):
+                    return Reply(f"⚠️ Nie udało się usunąć starej wersji: {err}")
+                prefix = "✏️ Stara wersja usunięta.\n"
+            reply = await self.save_records(owner, draft.records)
+            reply.text = prefix + reply.text
+            return reply
         if action == "undo":
-            saved = self._saved.pop(key, None)
-            if not saved or saved[0] != owner:
-                return Reply("Nie ma już czego cofać.")
-            try:
-                await self.wallet.delete_records(saved[1])
-            except WalletError as e:
-                self._saved[key] = saved
-                return Reply(f"⚠️ Nie udało się cofnąć: {e}")
-            if saved[2]:
-                self.planned.state.unmark(saved[2])  # termin wraca na listę do potwierdzenia
-            return Reply(f"↩️ Usunięto {len(saved[1])} rekord(y) z Wallet.")
+            if (err := await self._undo(owner, key)) is not None:
+                return Reply(err if err.startswith("Nie ma") else f"⚠️ Nie udało się cofnąć: {err}")
+            return Reply("↩️ Usunięto z Wallet.")
         return Reply("Nieznana akcja.")
+
+    async def _undo(self, owner: str, key: str) -> str | None:
+        """Usuwa zapisane rekordy spod klucza. Zwraca opis błędu albo None."""
+        saved = self._saved.pop(key, None)
+        if not saved or saved[0] != owner:
+            return "Nie ma już czego cofać."
+        try:
+            await self.wallet.delete_records(saved[1])
+        except WalletError as e:
+            self._saved[key] = saved
+            return str(e)
+        if saved[2]:
+            self.planned.state.unmark(saved[2])  # termin wraca na listę do potwierdzenia
+        return None
 
     async def save_records(self, owner: str, records: list[ParsedRecord], occ_key: str | None = None) -> Reply:
         payload = [self._to_wallet(r) for r in records]
@@ -188,6 +269,8 @@ class Core:
                 self.planned.state.mark(occ_key, "paid", ok_ids, records[0].amount)
             key = secrets.token_urlsafe(6)
             self._saved[key] = (owner, ok_ids, occ_key)
+            if not occ_key:  # poprawki „zmień na…” dotyczą zwykłych wpisów, nie płatności cyklicznych
+                self._last_saved[owner] = key
             buttons.append(("↩️ Cofnij", f"undo:{key}"))
         return Reply("\n".join(lines) or "⚠️ Nic nie zapisano.", buttons)
 
@@ -206,6 +289,20 @@ class Core:
         r.date = min(d, today).isoformat()
         r.amount = abs(r.amount)
         return r
+
+    async def _convert(self, r: ParsedRecord) -> None:
+        """Kwota w obcej walucie → waluta konta po kursie NBP z dnia transakcji (info w notatce)."""
+        src = (r.currency or "").upper()
+        dst = self._accounts.get(r.account_id, {}).get("currencyCode", self.cfg.base_currency)
+        r.currency = None
+        if not src or src == dst:
+            return
+        value, ratio, table_day = await self.fx.convert(r.amount, src, dst, date.fromisoformat(r.date))
+        info = f"{fmt_money(r.amount, src)} po {fmt_rate(ratio)} (NBP {table_day:%d.%m})"
+        # Przy poprawkach model powtarza notatkę z poprzedniej wersji — usuń stare przeliczenie.
+        note = _FX_NOTE.sub("", r.note or "").strip(" ·")
+        r.note = f"{note} · {info}" if note else info
+        r.amount = value
 
     def _to_wallet(self, r: ParsedRecord) -> dict:
         d = date.fromisoformat(r.date)
@@ -397,8 +494,34 @@ class Core:
             f"{len(self.planned.schedule.payments)} płatności cyklicznych."
         )
 
+    async def fx_quote(self, text: str) -> Reply:
+        """/kurs [kwota] [waluta] [na walutę] — np. „100 eur”, „50 usd eur”, „1000 pln usd”."""
+        today = self.today()
+        tokens = re.findall(r"\d+(?:[.,]\d+)?|[^\s\d]+", text.lower())
+        nums = [float(t.replace(",", ".")) for t in tokens if t[0].isdigit()]
+        codes = [c for t in tokens if not t[0].isdigit() and (c := resolve_code(t))]
+        try:
+            if not codes:
+                lines = ["💱 *Kursy NBP (średnie):*"]
+                for code in ("EUR", "USD", "CHF", "GBP"):
+                    rate, day = await self.fx.rate(code, today)
+                    lines.append(f"• 1 {code} = {fmt_rate(rate)} PLN")
+                lines.append(f"\nTabela z {day:%d.%m.%Y}. Przelicz: `/kurs 100 eur`")
+                return Reply("\n".join(lines))
+            src = codes[0]
+            dst = codes[1] if len(codes) > 1 else ("PLN" if src != "PLN" else "EUR")
+            amount = nums[0] if nums else 1.0
+            value, ratio, day = await self.fx.convert(amount, src, dst, today)
+        except Exception as e:
+            return Reply(f"⚠️ Nie mogę pobrać kursu: {e}")
+        return Reply(
+            f"💱 {fmt_money(amount, src)} = *{fmt_money(value, dst)}*\n"
+            f"Kurs NBP {fmt_rate(ratio)} z {day:%d.%m.%Y}"
+        )
+
     async def close(self) -> None:
         await self.wallet.close()
+        await self.fx.close()
 
 
 HELP = """👋 Zapisuję wydatki i przychody do Wallet.
@@ -408,13 +531,17 @@ Po prostu napisz, np.:
 • `paliwo 250 orlen wczoraj`
 • `kawa 14 i ciastko 9`
 • `wypłata 6200`
-• `obiad 20 euro`  → konto w EUR
+• `anthropic 15$`  → przeliczę na PLN po kursie NBP
 albo wyślij *zdjęcie paragonu*.
+
+Pamiętam ostatnie ~30 min rozmowy, więc możesz poprawiać:
+`zmień na 45` · `to było wczoraj` · `kategoria restauracje` · `i jeszcze parking 12`
 
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
+Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
 
-Komendy: saldo · miesiac · zaplanowane · plan · plany · odswiez · pomoc"""
+Komendy: saldo · miesiac · zaplanowane · plan · plany · kurs · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

@@ -370,6 +370,7 @@ class Planned:
         await self.core.refresh_catalog()
         record = ParsedRecord(
             amount=abs(p.amount if amount is None else amount),
+            currency=None,
             type=p.type,
             category_id=p.category_id,
             account_id=self.core.resolve_account(p.account),

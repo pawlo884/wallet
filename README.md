@@ -27,8 +27,18 @@ domeny ani HTTPS** na VPS.
 | `/zaplanowane` | płatności cykliczne: zaległe do potwierdzenia, najbliższe 30 dni i lista do odhaczenia opłaconych z góry |
 | `/plan <opis>` | nowa płatność cykliczna, np. `/plan netflix 49 co miesiąc 15-go` (szkic + ✅ Dodaj) |
 | `/plany` | wszystkie płatności cykliczne z przyciskami 🗑 do usuwania |
+| `/kurs [kwota] [waluta] [na]` | kursy NBP; np. `/kurs`, `/kurs 100 eur`, `/kurs 50 usd eur` |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
+
+## Pamięć rozmowy i waluty
+
+- Bot pamięta ostatnie ~30 minut rozmowy (najwyżej 8 wiadomości, tylko w RAM). Możesz więc dopowiadać
+  („to wydatek”, „15$”) i poprawiać: „zmień na 45”, „to było wczoraj”, „kategoria restauracje”.
+  Poprawka szkicu podmienia szkic. Poprawka zapisanego rekordu daje przycisk **✅ Zapisz poprawkę**,
+  który usuwa starą wersję i zapisuje nową.
+- Kwoty w obcej walucie („anthropic 15$”, „obiad 20 euro”) bot przelicza na walutę konta po średnim
+  kursie NBP z dnia transakcji. Oryginał trafia do notatki, np. `15,00 USD po 3,8881 (NBP 02.10)`.
 
 ## Płatności cykliczne
 

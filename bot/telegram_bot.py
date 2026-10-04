@@ -101,6 +101,11 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(CommandHandler("plan", on_plan, filters=user_filter))
+
+    async def on_kurs(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await send(update, await core.fx_quote(" ".join(ctx.args or [])))
+
+    app.add_handler(CommandHandler("kurs", on_kurs, filters=user_filter))
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
     app.add_handler(
         MessageHandler(

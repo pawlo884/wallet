@@ -34,13 +34,35 @@ class FakeWallet:
     async def close(self): pass
 
 
+def rec(**kw):
+    base = dict(currency=None, counterparty=None, note=None)
+    return ParsedRecord(**{**base, **kw})
+
+
 class FakeParser:
-    async def parse(self, text, images, today, catalog_prompt):
+    def __init__(self):
+        self.histories = []
+
+    async def parse(self, text, images, today, catalog_prompt, history=None):
         assert "Ogólne" in catalog_prompt and "Groceries" in catalog_prompt
-        return ParseResult(question=None, records=[
-            ParsedRecord(amount=-54.3, type="expense", category_id="food", account_id="pln", date=today.isoformat(), counterparty="Biedronka", note=None),
-            ParsedRecord(amount=20, type="expense", category_id="nope", account_id="bad", date="2999-01-01", counterparty=None, note="x"),
+        self.histories.append(history or [])
+        return ParseResult(question=None, amends=False, records=[
+            rec(amount=-54.3, type="expense", category_id="food", account_id="pln", date=today.isoformat(), counterparty="Biedronka"),
+            rec(amount=20, type="expense", category_id="nope", account_id="bad", date="2999-01-01", note="x"),
         ])
+
+
+class FakeFX:
+    async def convert(self, amount, src, dst, on):
+        rates = {"USD": 3.8881, "EUR": 4.3745, "PLN": 1.0}
+        ratio = rates[src] / rates[dst]
+        return round(amount * ratio, 2), ratio, on
+
+    async def rate(self, code, on):
+        return {"USD": 3.8881, "EUR": 4.3745, "CHF": 4.6, "GBP": 5.1, "PLN": 1.0}[code], on
+
+    async def close(self):
+        pass
 
 
 async def main():
@@ -181,3 +203,59 @@ async def plans():
 
 
 asyncio.run(plans())
+
+
+async def memory_and_fx():
+    """Pamięć rozmowy (poprawki szkicu i zapisanego rekordu) + przeliczanie walut."""
+    import datetime as dt
+
+    class ScriptedParser(FakeParser):
+        def __init__(self, script):
+            super().__init__()
+            self.script = list(script)
+
+        async def parse(self, text, images, today, catalog_prompt, history=None):
+            self.histories.append(history or [])
+            return self.script.pop(0)
+
+    anthropic15 = rec(amount=15, currency="USD", type="expense", category_id="food", account_id="pln",
+                      date="2026-10-04", counterparty="Anthropic")
+    script = [
+        ParseResult(records=[], amends=False, question="Ile wyniosło doładowanie?"),          # 1: brak kwoty
+        ParseResult(records=[anthropic15], amends=False, question=None),                       # 2: „15$”
+        ParseResult(records=[anthropic15.model_copy(update={"amount": 20})], amends=True, question=None),  # 3: „zmień na 20$”
+        ParseResult(records=[anthropic15.model_copy(update={"amount": 25, "note": "x · 20,00 USD po 3,8881 (NBP 04.10)"})],
+                    amends=True, question=None),                                               # 4: po zapisie „jednak 25$”
+    ]
+    core = Core(Config())
+    core.wallet, core.parser, core.fx = FakeWallet(), ScriptedParser(script), FakeFX()
+    core.today = lambda: dt.date(2026, 10, 4)
+
+    r1 = await core.handle_message("tg:1", "doładowanie konta anthropic", [])
+    r2 = await core.handle_message("tg:1", "15$", [])
+    hist = core.parser.histories[1]
+    assert [m["role"] for m in hist] == ["user", "assistant"] and "anthropic" in hist[0]["content"], hist
+    print(r2.text)
+    assert "−58,32 PLN" in r2.text and "15,00 USD po 3,8881" in r2.text, r2.text
+
+    r3 = await core.handle_message("tg:1", "zmień na 20$", [])
+    print(r3.text)
+    assert len(core._drafts) == 1 and "−77,76 PLN" in r3.text, "poprawka zastępuje szkic"
+    saved = await core.handle_callback("tg:1", r3.buttons[0][1])
+    assert core.wallet.created[-1]["amount"]["value"] == -77.76
+
+    r4 = await core.handle_message("tg:1", "jednak 25$", [])
+    print(r4.text, r4.buttons)
+    assert r4.text.startswith("✏️") and r4.buttons[0][0] == "✅ Zapisz poprawkę"
+    assert r4.text.count("NBP") == 1, "stara notatka z przeliczeniem usunięta"
+    done = await core.handle_callback("tg:1", r4.buttons[0][1])
+    print(done.text)
+    assert core.wallet.deleted == ["r0"] and core.wallet.created[-1]["amount"]["value"] == -97.2
+
+    print((await core.fx_quote("100 eur")).text)
+    print((await core.fx_quote("")).text)
+    assert "437,45 PLN" in (await core.fx_quote("100 eur")).text
+    print("\nOK memory+fx")
+
+
+asyncio.run(memory_and_fx())
