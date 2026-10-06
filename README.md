@@ -130,16 +130,7 @@ przy kilku wpisach dziennie. Jeśli paragony będą źle odczytywane, zmień `CL
 ### 3. Telegram
 1. Napisz do **@BotFather** → `/newbot` → skopiuj token do `TELEGRAM_BOT_TOKEN`.
 2. Uruchom bota, napisz do niego `/whoami` i wpisz zwrócone ID do `TELEGRAM_ALLOWED_USERS`. Zrestartuj bota.
-3. Opcjonalnie w BotFather ustaw `/setcommands`:
-   ```
-   saldo - salda kont
-   miesiac - podsumowanie miesiąca
-   zaplanowane - zaległe i najbliższe płatności
-   plan - dodaj płatność cykliczną
-   plany - lista i usuwanie płatności
-   odswiez - odśwież kategorie
-   pomoc - pomoc
-   ```
+3. Listy komend nie trzeba ustawiać w BotFather: bot sam ją rejestruje przy starcie (podpowiedzi po „/” i menu).
 
 
 > Bot obsługuje tylko użytkowników z listy `TELEGRAM_ALLOWED_USERS`. Przy pustej liście odpowiada wyłącznie na `/whoami`.
@@ -196,18 +187,30 @@ Test bez sieci (atrapy Wallet i Claude): `python -m tests.test_offline`
 
 ```
 bot/
-  main.py          start obu botów w jednej pętli asyncio
-  core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca
-  planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
+  main.py          start: Telegram, pętla przypomnień, strona prognozy, skrzynka z wyciągami
+  core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca, korekta salda
+  session.py       szkice i przyciski na wolumenie (przeżywają restart)
   parser.py        Claude (structured outputs) → lista rekordów
+  planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
+  debts.py         długi bez stałych rat i kredyty ratalne (etykiety w Wallet)
+  forecast.py      prognoza na 12 miesięcy
+  web.py           strona prognozy (port 8080, sieć NPM)
+  statement.py     wyciągi z banku: uzgadnianie z Wallet, skrzynka IMAP
+  investments.py   metale i ETF/akcje z wyceną na żywo
+  multisport.py    opłacalność karty Multisport
+  strava.py        połączenie ze Stravą (OAuth, aktywności)
+  fx.py            kursy NBP
+  stt.py           mowa → tekst (faster-whisper, lokalnie)
   wallet_api.py    klient Wallet REST API (paginacja, 409 sync, 429 limit)
   telegram_bot.py  adapter Telegram (python-telegram-bot)
   config.py        zmienne środowiskowe
+  templates/       szablon strony prognozy
 ```
 
 ## Uwagi
 
-- Szkice, przycisk „Cofnij” i oczekiwanie na kwotę (✏️) są trzymane w pamięci, więc po restarcie kontenera stare przyciski przestają działać.
-  Same rekordy w Wallet zostają.
+- Szkice, „Cofnij”, korekty salda i oczekiwanie na kwotę (✏️) są zapisywane w `data/session.json` na wolumenie,
+  więc przyciski działają też po restarcie i deployu. Szkice wygasają po dobie, „Cofnij” po 7 dniach.
+  Pamięć rozmowy (ostatnie 30 min) jest tylko w RAM i znika przy restarcie.
 - Limit Wallet API to 500 zapytań na godzinę. Bot zużywa 1 zapytanie na zapis i kilka na `/miesiac`.
 - Kategorie i konta są cache'owane przez godzinę. Po zmianach w aplikacji użyj `/odswiez`.
