@@ -193,7 +193,8 @@ class Planned:
         # Płatności dodane przez bota — obok stanu, na wolumenie (plik YAML jest tylko do odczytu).
         self._extra_path = Path(core.cfg.state_file).with_name("payments.json")
         self._extra = self._load_extra()
-        self._awaiting_amount: dict[str, str] = {}  # właściciel → klucz terminu
+        # właściciel → klucz terminu (✏️ Inna kwota); przeżywa restart, wygasa po dobie
+        self._awaiting_amount: dict[str, str] = core.session.dict("awaiting_amount", 24 * 3600)
 
     @property
     def schedule(self) -> Schedule:

@@ -6,7 +6,8 @@ import re
 import secrets
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
@@ -18,12 +19,14 @@ from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
 from .planned import Payment, Planned
+from .session import Session
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
 
 log = logging.getLogger(__name__)
 
 CATALOG_TTL = 3600
 DRAFT_TTL = 24 * 3600
+SAVED_TTL = 7 * 24 * 3600  # „Cofnij” i „zmień na…” po zapisie
 HISTORY_TTL = 30 * 60  # pamięć rozmowy: ostatnie 30 min
 HISTORY_TURNS = 8  # i najwyżej tyle wiadomości (user + bot)
 
@@ -68,12 +71,29 @@ class Core:
         self._catalog_prompt = ""
         self._catalog_at = 0.0
         self._catalog_lock = asyncio.Lock()
-        self._drafts: dict[str, _Draft] = {}
+        # Szkice i przyciski przeżywają restart (deploy) — zapis w data/session.json na wolumenie.
+        self.session = Session(Path(cfg.state_file).with_name("session.json"))
+        self._drafts: dict[str, _Draft] = self.session.dict(
+            "drafts", DRAFT_TTL,
+            lambda d: {"owner": d.owner, "records": [r.model_dump() for r in d.records],
+                       "created": d.created, "replaces": d.replaces},
+            lambda v: _Draft(v["owner"], [ParsedRecord(**r) for r in v["records"]], v["created"], v["replaces"]),
+        )
         # klucz → (właściciel, id rekordów, klucz terminu płatności cyklicznej lub None)
-        self._saved: dict[str, tuple[str, list[str], str | None]] = {}
-        self._plan_drafts: dict[str, tuple[str, Payment]] = {}  # klucz → (właściciel, szkic płatności)
-        self._inv_drafts: dict[str, tuple[str, Holding]] = {}
-        self._fix_drafts: dict[str, tuple] = {}  # korekty salda czekające na wybór (wpis / saldo początkowe)
+        self._saved: dict[str, tuple[str, list[str], str | None]] = self.session.dict(
+            "saved", SAVED_TTL, list, tuple
+        )
+        # klucz → (właściciel, szkic płatności)
+        self._plan_drafts: dict[str, tuple[str, Payment]] = self.session.dict(
+            "plan_drafts", DRAFT_TTL,
+            lambda v: [v[0], v[1].to_json(), v[1].source],
+            lambda v: (v[0], Payment.from_dict(v[1], v[2])),
+        )
+        self._inv_drafts: dict[str, tuple[str, Holding]] = self.session.dict(
+            "inv_drafts", DRAFT_TTL, lambda v: [v[0], asdict(v[1])], lambda v: (v[0], Holding(**v[1]))
+        )
+        # korekty salda czekające na wybór (wpis / saldo początkowe)
+        self._fix_drafts: dict[str, tuple] = self.session.dict("fix_drafts", DRAFT_TTL, list, tuple)
         self.fx = FX()
         self.stt = STT(cfg.stt_model, cfg.stt_threads) if cfg.stt_enabled else None
         self.reconciler = Reconciler(self)
@@ -82,8 +102,8 @@ class Core:
         self.strava = Strava(self)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
-        self._last_draft: dict[str, str] = {}  # właściciel → klucz ostatniego szkicu
-        self._last_saved: dict[str, str] = {}  # właściciel → klucz ostatnio zapisanych rekordów
+        self._last_draft: dict[str, str] = self.session.dict("last_draft", DRAFT_TTL)  # właściciel → klucz ostatniego szkicu
+        self._last_saved: dict[str, str] = self.session.dict("last_saved", SAVED_TTL)  # właściciel → klucz ostatnio zapisanych rekordów
         self.planned = Planned(self)
 
     # ---------- katalog kont i kategorii ----------
@@ -144,8 +164,7 @@ class Core:
         return datetime.now(self.cfg.tz).date()
 
     def _cleanup(self) -> None:
-        cutoff = time.time() - DRAFT_TTL
-        self._drafts = {k: d for k, d in self._drafts.items() if d.created > cutoff}
+        self._drafts.prune()
 
     # ---------- pamięć rozmowy ----------
 

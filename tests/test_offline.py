@@ -6,6 +6,9 @@ import os
 os.environ.setdefault("WALLET_API_TOKEN", "x")
 os.environ.setdefault("ANTHROPIC_API_KEY", "x")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123:abc")
+# stan (w tym szkice z data/session.json) w katalogu tymczasowym, nie w repo
+import tempfile as _tempfile
+os.environ.setdefault("STATE_FILE", os.path.join(_tempfile.mkdtemp(), "state.json"))
 
 from bot.config import Config
 from bot.core import Core
@@ -703,3 +706,43 @@ async def multisport_test():
 
 
 asyncio.run(multisport_test())
+
+
+async def restart():
+    """Szkic, „Cofnij”, korekta i ✏️ działają po restarcie kontenera (deploy)."""
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp())
+    os.environ.update(STATE_FILE=str(tmp / "s.json"), SCHEDULE_FILE="config/schedule.yaml")
+
+    def boot():
+        core = Core(Config())
+        core.wallet, core.parser = FakeWallet(), FakeParser()
+        return core
+
+    core = boot()
+    draft = await core.handle_message("tg:1", "biedronka 54,30", [])
+    fix = await core.balance_fix("tg:1", "100")
+    key = next(iter(core.planned.schedule.payments)).id
+    await core.planned.handle_callback("tg:1", "sa", f"{key}@20261004")
+
+    core = boot()  # „restart”
+    assert len(core._drafts) == 1 and core._drafts[next(iter(core._drafts))].records[0].counterparty == "Biedronka"
+    saved = await core.handle_callback("tg:1", draft.buttons[0][1])
+    assert saved.text.startswith("✅ Zapisano"), saved.text
+    assert core._fix_drafts and core.planned._awaiting_amount == {"tg:1": f"{key}@20261004"}
+
+    core = boot()
+    undo = await core.handle_callback("tg:1", saved.buttons[0][1])
+    assert undo.text.startswith("↩️") and core.wallet.deleted == ["r0", "r1"], undo.text
+    r = await core.handle_callback("tg:1", fix.buttons[-1][1])
+    assert r.text == "❌ Anulowano.", r.text
+    assert not boot()._fix_drafts, "obsłużona korekta znika też z pliku"
+
+    (tmp / "session.json").write_text("{zepsuty", encoding="utf-8")
+    assert not boot()._drafts, "uszkodzony plik nie blokuje startu"
+    print("\nOK restart")
+
+
+asyncio.run(restart())
