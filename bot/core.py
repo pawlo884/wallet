@@ -400,8 +400,9 @@ class Core:
 
     def _to_wallet(self, r: ParsedRecord) -> dict:
         d = date.fromisoformat(r.date)
-        if d == self.today():
-            when = datetime.now(timezone.utc)
+        now = datetime.now(self.cfg.tz)
+        if d == now.date():  # dzisiejszy wpis: bieżąca godzina; inny dzień: południe tego dnia
+            when = now.astimezone(timezone.utc)
         else:
             when = datetime(d.year, d.month, d.day, 12, tzinfo=self.cfg.tz).astimezone(timezone.utc)
         rec = {
