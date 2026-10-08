@@ -34,6 +34,7 @@ COMMANDS = [
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
     ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
+    ("pamiec", "Zapamiętani sprzedawcy (kategoria, konto)"),
     ("odswiez", "Odśwież konta i kategorie"),
     ("pomoc", "Jak korzystać z bota"),
 ]
@@ -189,6 +190,7 @@ def build(core: Core) -> Application:
         )
     )
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
+    app.add_handler(CommandHandler("pamiec", cmd(core.memory_list), filters=user_filter))
     app.add_handler(
         MessageHandler(
             user_filter & (filters.TEXT | filters.PHOTO | filters.Document.IMAGE) & ~filters.COMMAND,
@@ -208,7 +210,7 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn|ia|in|ir|iry):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn|ia|in|ir|iry|mf|mfy):"))
     return app
 
 

@@ -184,6 +184,7 @@ class RecordParser:
         today: date,
         catalog_prompt: str,
         history: list[dict] | None = None,
+        memory: str = "",
     ) -> ParseResult:
         """history: wcześniejsze tury [{"role": "user"|"assistant", "content": str}], od najstarszej."""
         content: list[dict] = [
@@ -207,8 +208,7 @@ class RecordParser:
         response = await self._client.messages.parse(
             model=self._model,
             max_tokens=4000,
-            # Katalog kont/kategorii zmienia się rzadko — stabilny prefiks do cache.
-            system=[{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}],
+            system=_system(catalog_prompt, memory),
             messages=[*(history or []), {"role": "user", "content": content}],
             output_format=ParseResult,
         )
@@ -218,11 +218,11 @@ class RecordParser:
             )
         return response.parsed_output
 
-    async def parse_statement(self, text: str, today: date, catalog_prompt: str) -> ParseResult:
+    async def parse_statement(self, text: str, today: date, catalog_prompt: str, memory: str = "") -> ParseResult:
         response = await self._client.messages.parse(
             model=self._model,
             max_tokens=16000,  # wyciąg może mieć kilkadziesiąt operacji
-            system=[{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}],
+            system=_system(catalog_prompt, memory),
             messages=[
                 {
                     "role": "user",
@@ -265,6 +265,15 @@ class RecordParser:
         if response.stop_reason == "refusal" or response.parsed_output is None:
             return PlanResult(plan=None, question="Nie zrozumiałem. Napisz np. `/plan netflix 49 co miesiąc 15-go`.")
         return response.parsed_output
+
+
+def _system(catalog_prompt: str, memory: str) -> list[dict]:
+    # Katalog kont/kategorii zmienia się rzadko — stabilny prefiks do cache. Pamięć sprzedawców
+    # zmienia się po każdym zapisie, więc osobny blok za nim (katalog zostaje w cache).
+    blocks = [{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}]
+    if memory:
+        blocks.append({"type": "text", "text": memory, "cache_control": {"type": "ephemeral"}})
+    return blocks
 
 
 _WEEKDAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]

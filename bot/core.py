@@ -14,6 +14,7 @@ from .config import Config
 from .debts import Debts, parse_debt_command
 from .fx import FX, FXError, resolve_code
 from .investments import Holding, Investments
+from .memory import Memory, short_id
 from .strava import Strava, StravaError
 from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
@@ -100,6 +101,7 @@ class Core:
         self.debts = Debts(self)
         self.investments = Investments(self)
         self.strava = Strava(self)
+        self.memory = Memory(self)  # sprzedawca → jak ostatnio zapisany (data/learned.json)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
         self._last_draft: dict[str, str] = self.session.dict("last_draft", DRAFT_TTL)  # właściciel → klucz ostatniego szkicu
@@ -235,12 +237,14 @@ class Core:
         except WalletError as e:
             return Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")
         result = await self.parser.parse(
-            text, images, self.today(), self._catalog_prompt, self._history_messages(owner)
+            text, images, self.today(), self._catalog_prompt, self._history_messages(owner),
+            memory=self.memory.prompt_block(),
         )
         if not result.records:
             return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
 
         records = [self._sanitize(r) for r in result.records]
+        self._apply_memory(records)
         for r in records:  # notatka zawsze — żeby po miesiącach było wiadomo, na co to poszło
             if not (r.note or "").strip():
                 r.note = (text.strip() or "z paragonu")[:120]
@@ -258,6 +262,9 @@ class Core:
                 seen = {self._fingerprint(r) for r in last.records}
                 records = [r for r in records if self._fingerprint(r) not in seen] or records
         self._cleanup()
+        remembered = list(dict.fromkeys(
+            r.counterparty for r in records if not r.transfer_to and self.memory.find(r.counterparty)
+        ))
 
         # Poprawka: zastępuje otwarty szkic albo (przez „Zapisz poprawkę”) ostatnio zapisane rekordy.
         replaces = None
@@ -276,6 +283,8 @@ class Core:
         self._last_draft[owner] = key
         header = "✏️ *Poprawka (zastąpi zapisany rekord):*" if replaces else "📝 *Do zapisania:*"
         lines = [header] + [self._describe(r) for r in records]
+        if remembered and not result.amends:
+            lines.append(f"🧠 _Jak ostatnio: {', '.join(remembered)}_")
         if result.question:
             lines.append(f"\n❓ {result.question}")
         ok_label = "✅ Zapisz poprawkę" if replaces else "✅ Zapisz"
@@ -294,6 +303,8 @@ class Core:
             return await self._inv_callback(owner, action, key)
         if action in ("kr", "ki", "kn"):
             return await self._fix_callback(owner, action, key)
+        if action in ("mf", "mfy"):
+            return self._memory_callback(action, key)
         if action == "dl":
             debt = self.debts.items.get(key)
             if not debt:
@@ -359,6 +370,7 @@ class Core:
             lines.append("⚠️ Błędy: " + "; ".join(errors))
         buttons = []
         if ok_ids:
+            self.memory.learn([rec for rec, res in zip(records, results) if res.get("success")])
             if occ_key:
                 self.planned.state.mark(occ_key, "paid", ok_ids, records[0].amount)
             key = secrets.token_urlsafe(6)
@@ -398,6 +410,17 @@ class Core:
         if debt and debt.category_id:
             r.category_id = debt.category_id
         return r
+
+    def _apply_memory(self, records: list[ParsedRecord]) -> None:
+        """Sprzedawca znany z wcześniejszych wpisów: ta sama nazwa, a gdy model nie dobrał kategorii —
+        kategoria z pamięci. Resztę (konto, typ, notatka) podpowiada model z bloku ZAPAMIĘTANE."""
+        for r in records:
+            if r.transfer_to or not (m := self.memory.find(r.counterparty)):
+                continue
+            r.counterparty = m["name"]
+            if r.category_id in (UNKNOWN_EXPENSE, UNKNOWN_INCOME) and m.get("type") == r.type \
+                    and m.get("category_id") in self._categories:
+                r.category_id = m["category_id"]
 
     @staticmethod
     def _fingerprint(r: ParsedRecord) -> tuple:
@@ -644,6 +667,37 @@ class Core:
         self.planned.remove(p.id)
         return Reply(f"🗑 Usunięto: {p.name}")
 
+    # ---------- pamięć sprzedawców (/pamiec) ----------
+
+    async def memory_list(self) -> Reply:
+        if not self.memory.items:
+            return Reply("🧠 Jeszcze nic nie pamiętam. Po każdym zapisie zapamiętuję sprzedawcę, "
+                         "kategorię i konto — następnym razem podpowiem to samo.")
+        try:
+            await self.refresh_catalog()
+        except WalletError:
+            pass
+        top = self.memory.top(30)
+        lines = [f"🧠 *Pamiętam {len(self.memory.items)} sprzedawców.* Najczęstsi:"]
+        for _, v in top:
+            cat = self._categories.get(v.get("category_id"), {}).get("name", "?")
+            line = f"• {v['name']} → {cat}"
+            if v.get("account_id") and v["account_id"] != self._default_account_id:
+                line += f", konto {self._accounts.get(v['account_id'], {}).get('name', '?')}"
+            lines.append(f"{line} ({v.get('count', 1)}×)")
+        lines.append("\nPoprawka wpisu (np. „kategoria restauracje”) od razu zmienia pamięć. "
+                     "Zapomnij sprzedawcę: przycisk poniżej.")
+        return Reply("\n".join(lines), [(f"🗑 {v['name']}", f"mf:{short_id(k)}") for k, v in top], column=True)
+
+    def _memory_callback(self, action: str, sid: str) -> Reply:
+        item = next((v for k, v in self.memory.items.items() if short_id(k) == sid), None)
+        if not item:
+            return Reply("Tego sprzedawcy już nie pamiętam.")
+        if action == "mf":
+            return Reply(f"Zapomnieć *{item['name']}*?", [("🗑 Tak", f"mfy:{sid}"), ("Zostaw", "keep:")])
+        self.memory.forget(sid)
+        return Reply(f"🗑 Zapomniałem: {item['name']}")
+
     async def refresh(self) -> Reply:
         try:
             await self.refresh_catalog(force=True)
@@ -883,6 +937,7 @@ albo wyślij *zdjęcie paragonu*.
 
 Pamiętam ostatnie ~30 min rozmowy, więc możesz poprawiać:
 `zmień na 45` · `to było wczoraj` · `kategoria restauracje` · `i jeszcze parking 12`
+🧠 Uczę się z zapisów: następny paragon z tego samego sklepu dostanie tę samą kategorię i konto. Lista: `/pamiec`
 
 Płatności cykliczne: przypominam w dniu terminu — ✅ / ✏️ / ⏭.
 Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
@@ -895,7 +950,7 @@ Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wall
 
 Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
 
-Komendy: saldo · miesiac · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · kurs · wyciag · korekta · odswiez · pomoc"""
+Komendy: saldo · miesiac · pamiec · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · kurs · wyciag · korekta · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

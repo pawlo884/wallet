@@ -46,7 +46,7 @@ class FakeParser:
     def __init__(self):
         self.histories = []
 
-    async def parse(self, text, images, today, catalog_prompt, history=None):
+    async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
         assert "Ogólne" in catalog_prompt and "Groceries" in catalog_prompt
         self.histories.append(history or [])
         return ParseResult(question=None, amends=False, records=[
@@ -243,7 +243,7 @@ async def memory_and_fx():
             super().__init__()
             self.script = list(script)
 
-        async def parse(self, text, images, today, catalog_prompt, history=None):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
             self.histories.append(history or [])
             return self.script.pop(0)
 
@@ -325,7 +325,7 @@ async def statements():
     ]
 
     class StmtParser(FakeParser):
-        async def parse_statement(self, text, today, catalog_prompt):
+        async def parse_statement(self, text, today, catalog_prompt, memory=""):
             return ParseResult(records=[r.model_copy() for r in ops], amends=False, question=None)
 
     class StmtWallet(FakeWallet):
@@ -395,7 +395,7 @@ async def debts():
             return await super().records(*a, **k)
 
     class DebtParser(FakeParser):
-        async def parse(self, text, images, today, catalog_prompt, history=None):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
             assert "a6 | A6" in catalog_prompt, "prompt zna długi"
             return ParseResult(amends=False, question=None, records=[
                 rec(amount=500, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
@@ -469,7 +469,7 @@ async def forecast_web_transfer():
     ACC.append({"id": "awar", "name": "Awaryjne", "currencyCode": "PLN", "balance": {"currentBalance": 0}})
 
     class TransferParser(FakeParser):
-        async def parse(self, text, images, today, catalog_prompt, history=None):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
             return ParseResult(amends=False, question=None, records=[
                 rec(amount=300, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
                     note="odkładam na awaryjne", transfer_to="awar")])
@@ -746,3 +746,87 @@ async def restart():
 
 
 asyncio.run(restart())
+
+
+async def memory_test():
+    """Bot uczy się sprzedawców: po zapisie „Piekarnia Julka” kolejny paragon dostaje tę samą kategorię i nazwę."""
+    import tempfile
+    from pathlib import Path
+    from bot.memory import merchant_key
+
+    tmp = Path(tempfile.mkdtemp())
+    os.environ.update(STATE_FILE=str(tmp / "s.json"), SCHEDULE_FILE="config/schedule.yaml")
+    cats = CAT + [{"id": "bakery", "name": "Piekarnia", "group": {"name": "Food & Drinks"}}]
+
+    class MemWallet(FakeWallet):
+        async def categories(self): return cats
+        async def records(self, *a, **k):
+            assert k.get("isTransfer") == "false"
+            return [
+                {"counterParty": "Lidl", "accountId": "pln", "category": {"id": "food"}, "amount": {"value": -20},
+                 "recordDate": "2026-09-01T10:00:00Z", "note": "zakupy"},
+                {"counterParty": "LIDL", "accountId": "pln", "category": {"id": "food"}, "amount": {"value": -30},
+                 "recordDate": "2026-09-05T10:00:00Z", "note": "owoce"},
+            ]
+
+    class MemParser:
+        def __init__(self):
+            self.memories, self.out = [], None
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+            self.memories.append(memory)
+            return ParseResult(question=None, amends=False, records=[self.out(today)])
+
+    def boot():
+        core = Core(Config())
+        core.wallet, core.parser = MemWallet(), MemParser()
+        return core
+
+    assert merchant_key("PIEKARNIA  Julka Sp. z o.o.") == merchant_key("piekarnia julka") == "piekarnia julka"
+    core = boot()
+    await core.memory.bootstrap()
+    assert core.memory.items["lidl"]["count"] == 2 and core.memory.items["lidl"]["note"] == "owoce"
+
+    # pierwszy paragon: model sam wybiera kategorię, użytkownik zapisuje
+    core.parser.out = lambda d: rec(amount=12.5, type="expense", category_id="bakery", account_id="eur",
+                                    date=d.isoformat(), counterparty="Piekarnia Julka", note="chleb, bułki")
+    r = await core.handle_message("tg:1", "", [(b"jpg", "image/jpeg")])
+    assert "🧠" not in r.text
+    await core.handle_callback("tg:1", r.buttons[0][1])
+    assert core.memory.items["piekarnia julka"]["category_id"] == "bakery"
+
+    # po restarcie: pamięć w prompcie; model zwraca inną pisownię i nieznaną kategorię → uzupełnione z pamięci
+    core = boot()
+    core.parser.out = lambda d: rec(amount=8, type="expense", category_id="nope", account_id="pln",
+                                    date=d.isoformat(), counterparty="PIEKARNIA JULKA", note="bułki")
+    r = await core.handle_message("tg:1", "julka 8", [])
+    print(r.text)
+    mem = core.parser.memories[-1]
+    assert "Piekarnia Julka | expense | bakery (Piekarnia) | eur (Euro) | chleb, bułki | 1×" in mem, mem
+    assert "Lidl" in mem or "LIDL" in mem
+    draft = core._drafts[r.buttons[0][1][3:]].records[0]
+    assert draft.counterparty == "Piekarnia Julka" and draft.category_id == "bakery"
+    assert "🧠 _Jak ostatnio: Piekarnia Julka_" in r.text
+
+    # poprawka uczy: zapis z inną kategorią nadpisuje pamięć, licznik rośnie
+    draft.category_id = "food"
+    await core.handle_callback("tg:1", r.buttons[0][1])
+    assert core.memory.items["piekarnia julka"]["category_id"] == "food" and core.memory.items["piekarnia julka"]["count"] == 2
+
+    # /pamiec i zapominanie
+    lst = await core.memory_list()
+    print(lst.text)
+    btn = next(d for t, d in lst.buttons if "Julka" in t)
+    ask = await core.handle_callback("tg:1", btn)
+    assert ask.buttons[0][1].startswith("mfy:")
+    assert (await core.handle_callback("tg:1", ask.buttons[0][1])).text.startswith("🗑 Zapomniałem")
+    assert "piekarnia julka" not in boot().memory.items
+
+    # bootstrap tylko raz (plik już jest) — nie nadpisuje nauczonego
+    await boot().memory.bootstrap()
+    assert "piekarnia julka" not in boot().memory.items
+    (tmp / "learned.json").write_text("{zepsuty", encoding="utf-8")
+    assert boot().memory.items == {}, "uszkodzony plik nie blokuje startu"
+    print("\nOK pamięć")
+
+
+asyncio.run(memory_test())
