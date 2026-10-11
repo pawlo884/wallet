@@ -37,6 +37,7 @@ domeny ani HTTPS** na VPS.
 | `/inwestycje` | wycena na żywo w PLN (metale: gold-api.com, ETF/akcje: Yahoo, kurs NBP), zysk/strata |
 | `/multisport` | czy karta Multisport się opłaca: wejścia ze Stravy, koszt wejścia, próg opłacalności |
 | `/strava` | jednorazowe połączenie konta Strava (OAuth) |
+| `/pamiec` | zapamiętani sprzedawcy (kategoria, konto) i zapominanie |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -48,6 +49,18 @@ domeny ani HTTPS** na VPS.
   który usuwa starą wersję i zapisuje nową.
 - Kwoty w obcej walucie („anthropic 15$”, „obiad 20 euro”) bot przelicza na walutę konta po średnim
   kursie NBP z dnia transakcji. Oryginał trafia do notatki, np. `15,00 USD po 3,8881 (NBP 02.10)`.
+
+## Pamięć sprzedawców (uczenie się z wpisów)
+
+- Po każdym zapisie (✅) bot zapamiętuje sprzedawcę: nazwę, typ, kategorię, konto i notatkę.
+  Kolejna wiadomość albo paragon z tego samego miejsca („julka 8”, zdjęcie paragonu z Piekarni Julka)
+  dostaje tę samą nazwę, kategorię i konto, a notatkę w podobnym stylu. Szkic pokazuje wtedy
+  `🧠 Jak ostatnio: Piekarnia Julka`.
+- Najnowszy zapis wygrywa: poprawka („kategoria restauracje” → ✅ Zapisz poprawkę) od razu zmienia pamięć.
+- Przy pierwszym starcie pamięć wypełnia się historią z Wallet z ostatniego roku (najczęstsza
+  kategoria i konto dla każdego sprzedawcy), więc działa też dla wpisów dodanych w aplikacji.
+- `/pamiec` pokazuje najczęstszych sprzedawców i pozwala zapomnieć wybranego. Plik: `data/learned.json`
+  na wolumenie (usunięcie go = ponowne wczytanie historii z Wallet przy następnym starcie).
 
 ## Głosówki (mowa → tekst)
 
@@ -190,6 +203,7 @@ bot/
   main.py          start: Telegram, pętla przypomnień, strona prognozy, skrzynka z wyciągami
   core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca, korekta salda
   session.py       szkice i przyciski na wolumenie (przeżywają restart)
+  memory.py        pamięć sprzedawców: kategoria i konto jak ostatnio (data/learned.json)
   parser.py        Claude (structured outputs) → lista rekordów
   planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
   debts.py         długi bez stałych rat i kredyty ratalne (etykiety w Wallet)

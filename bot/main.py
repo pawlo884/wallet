@@ -62,6 +62,7 @@ async def run() -> None:
         await core.refresh_catalog(force=True)  # wcześnie wykrywa zły token Wallet (WalletError = koniec)
     except httpx.HTTPError as e:  # chwilowy brak sieci — katalog dociągnie się przy pierwszej wiadomości
         log.warning("Wallet API niedostępne przy starcie: %r", e)
+    memory_boot = asyncio.create_task(core.memory.bootstrap())  # jednorazowo: sprzedawcy z historii Wallet  # noqa: F841
     if core.stt:
         stt_preload = asyncio.create_task(core.stt.preload())  # w tle; boty startują od razu  # noqa: F841
 

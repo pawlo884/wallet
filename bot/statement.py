@@ -56,7 +56,9 @@ class Reconciler:
 
         core = self.core
         await core.refresh_catalog()
-        result = await core.parser.parse_statement(text, core.today(), core._catalog_prompt)
+        result = await core.parser.parse_statement(
+            text, core.today(), core._catalog_prompt, memory=core.memory.prompt_block()
+        )
         ops = [core._sanitize(r) for r in result.records]
         if not ops:
             return [Reply(f"📄 Nie znalazłem żadnych operacji (źródło: {source})." +
