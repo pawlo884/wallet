@@ -978,3 +978,48 @@ async def lists_test():
 
 
 asyncio.run(lists_test())
+
+
+async def panel_test():
+    """API panelu (/api/v1): zadania, książki, dziennik; zapisy tylko jako JSON."""
+    import tempfile
+    from pathlib import Path
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot import web
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), FakeParser()
+    async with TestClient(TestServer(web.build_app(core))) as c:
+        r = await c.post("/api/v1/tasks", json={"title": "Wymienić opony", "due": "2026-10-25"})
+        assert r.status == 201
+        tid = (await r.json())["id"]
+        r = await c.post("/api/v1/tasks", data="title=x", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        assert r.status == 415, "zwykły formularz z obcej strony nie przejdzie"
+        assert (await c.post("/api/v1/tasks", json={"title": "x", "due": "jutro"})).status == 400
+        r = await c.patch(f"/api/v1/tasks/{tid}", json={"due": "2026-10-26"})
+        assert (await r.json())["moves"] == 1
+        await c.patch(f"/api/v1/tasks/{tid}", json={"status": "done"})
+        t = await (await c.get("/api/v1/tasks")).json()
+        assert t["open"] == [] and t["done"][0]["title"] == "Wymienić opony"
+
+        r = await c.post("/api/v1/books", json={"title": "Diuna", "author": "Frank Herbert", "status": "to_buy"})
+        bid = (await r.json())["id"]
+        assert (await c.post("/api/v1/books", json={"title": "diuna", "status": "to_buy"})).status == 200, "duplikat"
+        assert (await c.patch(f"/api/v1/books/{bid}", json={"status": "zle"})).status == 400
+        await c.patch(f"/api/v1/books/{bid}", json={"status": "reading"})
+        assert core.store.book(bid).status == "reading"
+        assert (await c.delete(f"/api/v1/books/{bid}")).status == 200 and core.store.books() == []
+
+        o = await (await c.get("/api/v1/overview")).json()
+        assert o["tasks"]["done_today"] == 1 and o["month"]["expense"] == 50 and o["month"]["income"] == 100
+        ev = (await (await c.get("/api/v1/events?kind=panel")).json())["events"]
+        assert [e["name"] for e in ev][:2] == ["book_delete", "book_update"]
+        days = (await (await c.get("/api/v1/stats/daily?days=7")).json())["days"]
+        assert len(days) == 7 and days[-1]["date"] == core.today().isoformat()
+        r = await c.get("/panel")
+        assert r.status in (200, 503)  # 503, gdy front nie jest zbudowany (testy poza obrazem)
+    print("\nOK panel")
+
+
+asyncio.run(panel_test())

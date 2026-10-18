@@ -542,22 +542,19 @@ class Core:
             lines.append(f"• {a['name']}: {fmt_money(bal.get('currentBalance', 0), a.get('currencyCode', ''))}")
         return Reply("\n".join(lines))
 
-    async def month_summary(self) -> Reply:
+    async def month_data(self) -> dict:
+        """Bieżący miesiąc: przychody, wydatki, kategorie (bez przelewów i kont archiwalnych)."""
         today = self.today()
         start = today.replace(day=1)
         end = (start + timedelta(days=32)).replace(day=1)
-        try:
-            await self.refresh_catalog()
-            # Tylko aktywne konta liczone do statystyk — archiwum (stara historia) nie może dublować wydatków.
-            counted = [a for a, acc in self._accounts.items() if not acc.get("excludeFromStats")][:10]
-            records = await self.wallet.records(
-                start.isoformat(), end.isoformat(), isTransfer="false", convertTo=self.cfg.base_currency,
-                accountId=",".join(counted),
-            ) if counted else []
-        except WalletError as e:
-            return Reply(f"⚠️ {e}")
+        await self.refresh_catalog()
+        # Tylko aktywne konta liczone do statystyk — archiwum (stara historia) nie może dublować wydatków.
+        counted = [a for a, acc in self._accounts.items() if not acc.get("excludeFromStats")][:10]
+        records = await self.wallet.records(
+            start.isoformat(), end.isoformat(), isTransfer="false", convertTo=self.cfg.base_currency,
+            accountId=",".join(counted),
+        ) if counted else []
 
-        cur = self.cfg.base_currency
         by_cat: dict[str, float] = defaultdict(float)
         income = expense = 0.0
         for r in records:
@@ -568,19 +565,30 @@ class Core:
                 by_cat[(r.get("category") or {}).get("name", "Nieznana")] += -value
             else:
                 income += value
-
         days = (min(today, end - timedelta(days=1)) - start).days + 1
+        return {
+            "month": start.strftime("%m.%Y"), "day": days, "currency": self.cfg.base_currency,
+            "income": round(income, 2), "expense": round(expense, 2),
+            "categories": [{"name": n, "value": round(v, 2)} for n, v in sorted(by_cat.items(), key=lambda x: -x[1])[:10]],
+        }
+
+    async def month_summary(self) -> Reply:
+        try:
+            m = await self.month_data()
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+        cur, income, expense, days = m["currency"], m["income"], m["expense"], m["day"]
         lines = [
-            f"📊 *{start.strftime('%m.%Y')}* (dzień {days})",
+            f"📊 *{m['month']}* (dzień {days})",
             f"Przychody: {fmt_money(income, cur)}",
             f"Wydatki: {fmt_money(-expense, cur)}",
             f"Bilans: {fmt_money(income - expense, cur)}",
             f"Średnio dziennie: {fmt_money(-expense / days, cur)}",
         ]
-        if by_cat:
+        if m["categories"]:
             lines.append("\n*Największe kategorie:*")
-            for name, v in sorted(by_cat.items(), key=lambda x: -x[1])[:10]:
-                lines.append(f"• {name}: {fmt_money(-v, cur)} ({v / expense:.0%})")
+            for c in m["categories"]:
+                lines.append(f"• {c['name']}: {fmt_money(-c['value'], cur)} ({c['value'] / expense:.0%})")
         return Reply("\n".join(lines))
 
     async def planned_overview(self) -> list[Reply]:

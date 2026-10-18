@@ -221,6 +221,28 @@ class Store:
     def recent_events(self, limit: int = 15) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
+    def events(self, limit: int = 50, before_id: int | None = None, kind: str | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM events WHERE 1=1", []
+        if before_id:
+            sql, args = sql + " AND id < ?", [*args, before_id]
+        if kind:
+            sql, args = sql + " AND kind = ?", [*args, kind]
+        rows = self.db.execute(sql + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def daily_stats(self, since: float, tz) -> dict[str, dict]:
+        """Dzień (YYYY-MM-DD, czas lokalny) → liczba wiadomości i przycisków, wywołań modelu, koszt."""
+        out: dict[str, dict] = {}
+        for r in self.db.execute("SELECT at, kind, cost_usd FROM events WHERE at >= ?", (since,)):
+            day = datetime.fromtimestamp(r["at"], tz).date().isoformat()
+            d = out.setdefault(day, {"actions": 0, "llm": 0, "cost_usd": 0.0})
+            if r["kind"] == "llm":
+                d["llm"] += 1
+                d["cost_usd"] += r["cost_usd"] or 0
+            elif r["kind"] in ("message", "button", "command"):
+                d["actions"] += 1
+        return out
+
     def cost_since(self, since: float) -> tuple[float, int]:
         row = self.db.execute(
             "SELECT COALESCE(SUM(cost_usd), 0) AS c, COUNT(*) AS n FROM events WHERE kind = 'llm' AND at >= ?", (since,)
