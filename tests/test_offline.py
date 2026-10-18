@@ -855,14 +855,11 @@ async def lotto_test():
     core.today = lambda: __import__("datetime").date(2026, 10, 18)
     t = (await core.lotto_report()).text
     print(t)
+    assert "🎰 *Eurojackpot*" in t and "Lotto" not in t.replace("/lotto", "")
     assert "Wydane: −403,00 PLN" in t and "Wygrane: 43,30 PLN" in t and "Bilans: *−359,70 PLN*" in t
-    assert "Zwrot: 11%" in t and "Największa wygrana: 43,30 PLN (Eurojackpot, 16.10.2026)" in t
-    assert "Eurojackpot: wydane −290,00 PLN" in t and "Lotto: wydane −113,00 PLN" in t
-    assert "główna wygrana 1 : 139 838 160" in t and "główna wygrana 1 : 13 983 816" in t
-    top, anyp = lotto.ODDS["Eurojackpot"]
-    assert round(1 / anyp) == 32, "oficjalnie ~1:32"
-    assert round(1 / lotto.ODDS["Lotto"][1]) == 54
-    assert lotto.game_of({"note": "kupon"}) == "Inne"
+    assert "Zwrot: 11%" in t and "Największa wygrana: 43,30 PLN (16.10.2026)" in t
+    assert "główna wygrana 1 : 139 838 160, jakakolwiek wygrana 1 : 32" in t
+    assert round(1 / lotto.ODDS[1]) == 32, "oficjalnie ~1:32"
 
     class Empty(FakeWallet):
         async def records(self, *a, **k): return []

@@ -31,7 +31,7 @@ COMMANDS = [
     ("inwestycje", "Wycena inwestycji (srebro, złoto, ETF)"),
     ("inwestycja", "Dodaj inwestycję, np. /inwestycja srebro 2 uncje"),
     ("multisport", "Czy karta Multisport się opłaca (Strava)"),
-    ("lotto", "Lotto i Eurojackpot: wydane, wygrane, zwrot, szanse"),
+    ("lotto", "Eurojackpot: wydane, wygrane, zwrot, szanse"),
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
     ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
