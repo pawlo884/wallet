@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 # Lista komend widoczna w Telegramie (kolejność = kolejność w menu).
 COMMANDS = [
+    ("zadania", "Lista zadań: dziś, zaległe, najbliższe"),
+    ("zadanie", "Nowe zadanie, np. /zadanie jutro zadzwonić do ZUS"),
+    ("ksiazki", "Książki: czytam, do przeczytania, do kupienia"),
+    ("ksiazka", "Dodaj książkę, np. /ksiazka Diuna"),
     ("saldo", "Salda kont"),
     ("miesiac", "Podsumowanie bieżącego miesiąca"),
     ("prognoza", "Prognoza na 12 miesięcy"),
@@ -37,6 +41,7 @@ COMMANDS = [
     ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
     ("pamiec", "Zapamiętani sprzedawcy (kategoria, konto)"),
     ("odswiez", "Odśwież konta i kategorie"),
+    ("log", "Dziennik: co bot robił i ile kosztował model"),
     ("pomoc", "Jak korzystać z bota"),
 ]
 
@@ -113,6 +118,12 @@ def build(core: Core) -> Application:
             await send(update, await fn())
         return handler
 
+    async def log_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        # Grupa -1: każda komenda trafia do dziennika, zanim obsłuży ją właściwy handler.
+        text = update.effective_message.text or ""
+        core.store.log_event("command", name=text.split()[0][1:].split("@")[0] if text else "", input=text)
+
+    app.add_handler(MessageHandler(user_filter & filters.COMMAND, log_command), group=-1)
     app.add_handler(CommandHandler("whoami", on_whoami))
     app.add_handler(CommandHandler(["start", "pomoc", "help"], on_start, filters=user_filter))
     app.add_handler(CommandHandler("saldo", cmd(core.balances), filters=user_filter))
@@ -191,6 +202,20 @@ def build(core: Core) -> Application:
             on_statement_file,
         )
     )
+    async def on_item(update: Update, ctx: ContextTypes.DEFAULT_TYPE, kind: str) -> None:
+        await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+        try:
+            reply = await core.add_item(f"tg:{update.effective_user.id}", kind, " ".join(ctx.args or []))
+        except Exception:
+            log.exception("Błąd /%s", kind)
+            reply = Reply("⚠️ Coś poszło nie tak. Spróbuj ponownie za chwilę.")
+        await send(update, reply)
+
+    app.add_handler(CommandHandler("zadania", cmd(core.tasks_list), filters=user_filter))
+    app.add_handler(CommandHandler("zadanie", lambda u, c: on_item(u, c, "task"), filters=user_filter))
+    app.add_handler(CommandHandler("ksiazki", cmd(core.books_list), filters=user_filter))
+    app.add_handler(CommandHandler("ksiazka", lambda u, c: on_item(u, c, "book"), filters=user_filter))
+    app.add_handler(CommandHandler("log", cmd(core.event_log), filters=user_filter))
     app.add_handler(CommandHandler("odswiez", cmd(core.refresh), filters=user_filter))
     app.add_handler(CommandHandler("pamiec", cmd(core.memory_list), filters=user_filter))
     app.add_handler(
@@ -212,7 +237,8 @@ def build(core: Core) -> Application:
         await send(update, reply)
 
     app.add_handler(MessageHandler(user_filter & (filters.VOICE | filters.AUDIO), on_voice))
-    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn|ia|in|ir|iry|mf|mfy):"))
+    app.add_handler(CallbackQueryHandler(on_button, pattern=r"^(ok|no|undo|sp|sa|ss|pk|pa|pn|rm|rmy|keep|dl|dly|kr|ki|kn|ia|in|ir|iry|mf|mfy"
+                                     r"|iu|tk|td|tp|tn|tx|txy|bk|bs|bx|bxy):"))
     return app
 
 
@@ -220,6 +246,7 @@ def notifier(app: Application, core: Core):
     """Wysyła wiadomość z inicjatywy bota do każdej dozwolonej osoby (czat prywatny = ID użytkownika)."""
 
     async def notify(reply: Reply) -> None:
+        core.store.log_event("notify", output=reply.text)
         for uid in core.cfg.telegram_allowed:
             try:
                 await _send(app.bot, uid, reply)

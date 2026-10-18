@@ -22,6 +22,8 @@ class Config:
         default_factory=lambda: os.getenv("WALLET_API_URL", "https://rest.budgetbakers.com/wallet")
     )
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-haiku-4-5"))
+    # Miesięczny limit kosztu modelu w USD (0 = bez limitu). Po przekroczeniu bot raz wysyła ostrzeżenie.
+    llm_budget_usd: float = field(default_factory=lambda: float(os.getenv("LLM_BUDGET_USD", "0") or 0))
     # Nazwa lub ID konta używanego, gdy wiadomość nie wskazuje konta.
     default_account: str = field(default_factory=lambda: os.getenv("DEFAULT_ACCOUNT", ""))
     base_currency: str = field(default_factory=lambda: os.getenv("BASE_CURRENCY", "PLN"))

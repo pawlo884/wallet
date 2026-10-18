@@ -39,6 +39,13 @@ domeny ani HTTPS** na VPS.
 | `/lotto` | Eurojackpot: ile wydane, ile wygrane, zwrot, szanse na wygraną |
 | `/strava` | jednorazowe połączenie konta Strava (OAuth) |
 | `/pamiec` | zapamiętani sprzedawcy (kategoria, konto) i zapominanie |
+| `jutro zadzwonić do ubezpieczyciela` | nowe zadanie z terminem (bez transakcji) |
+| `/zadania` | zaległe, dziś, najbliższe i bez terminu; przyciski ☑️ zrobione / ⏭ jutro / 📅 za tydzień |
+| `/zadanie <opis>` | nowe zadanie wprost, np. `/zadanie do soboty wymienić opony` |
+| 📷 screen z książkami | książki na listę (okładka, strona sklepu, półka w Legimi/Empik/Kindle) |
+| `/ksiazki` | czytam, do przeczytania, do kupienia, przeczytane; zmiana statusu przyciskiem |
+| `/ksiazka <tytuł>` | nowa książka wprost, np. `/ksiazka Diuna Frank Herbert` |
+| `/log` | dziennik: ostatnie wiadomości, przyciski, wywołania modelu i koszt w tym miesiącu |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
 | `/whoami` | pokazuje Twoje ID (do konfiguracji) |
 
@@ -62,6 +69,33 @@ domeny ani HTTPS** na VPS.
   kategoria i konto dla każdego sprzedawcy), więc działa też dla wpisów dodanych w aplikacji.
 - `/pamiec` pokazuje najczęstszych sprzedawców i pozwala zapomnieć wybranego. Plik: `data/learned.json`
   na wolumenie (usunięcie go = ponowne wczytanie historii z Wallet przy następnym starcie).
+
+## Zadania i książki
+
+Pierwszy krok do osobistego asystenta (plan: `plan-asystenta.md` w plikach projektu). Piszesz normalnie,
+a ten sam model, który rozpoznaje wydatki, rozpoznaje też zadania i książki. Jedna wiadomość może mieć
+wszystko naraz: „kupiłem Atomowe nawyki 45 zł” to szkic wydatku do ✅ i od razu zmiana statusu książki
+na 📚 *do przeczytania*.
+
+- **Zadania** trafiają na listę od razu (z ↩️ Cofnij), z terminem, jeśli wynika z wiadomości („jutro”,
+  „w piątek”, „do 20-go”). Odhaczasz zdaniem („zadzwoniłem do ubezpieczyciela”) albo w `/zadania`.
+  Bot liczy przesunięcia; przy trzecim pyta, czy rozbić zadanie albo je skreślić.
+- **Książki** mają cztery statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane.
+  Screen strony sklepu albo listy życzeń = do kupienia, screen półki/biblioteki („mam”) = do przeczytania.
+  Każda widoczna książka osobno, z autorem. Ta sama książka drugi raz nie jest dublowana.
+
+## Baza i dziennik zdarzeń
+
+Zadania, książki i dziennik leżą w `data/assistant.db` (SQLite) na wolumenie `wallet-data`, więc przetrwają
+restart i przebudowę. Dziennik zapisuje każdą wiadomość, przycisk, komendę, wiadomość wysłaną przez bota
+i każde wywołanie modelu: który „agent” obsłużył sprawę (wydatki / zadania / ksiazki), tokeny, koszt w USD
+i czas. Wpisy jednej wiadomości łączy wspólny `trace`. Wpisy starsze niż 180 dni są usuwane przy starcie.
+
+- `/log` pokazuje ostatnie 15 zdarzeń i koszt modelu dziś i w tym miesiącu.
+- `LLM_BUDGET_USD` w `.env` (np. `5`) włącza miesięczny limit: po przekroczeniu bot raz w miesiącu
+  wysyła ostrzeżenie. 0 albo puste = bez limitu.
+- Podgląd z serwera: `docker compose exec wallet-bot python -c "import sqlite3; [print(dict(r)) for r in
+  sqlite3.connect('data/assistant.db').execute('select * from events order by id desc limit 5')]"`.
 
 ## Głosówki (mowa → tekst)
 
@@ -205,6 +239,9 @@ bot/
   core.py          logika: szkic → zapis → cofnij, salda, podsumowanie miesiąca, korekta salda
   session.py       szkice i przyciski na wolumenie (przeżywają restart)
   memory.py        pamięć sprzedawców: kategoria i konto jak ostatnio (data/learned.json)
+  store.py         baza asystenta SQLite: zadania, książki, dziennik zdarzeń (data/assistant.db)
+  lists.py         zadania i książki: akcje z modelu, /zadania, /ksiazki, przyciski, cofanie
+  events.py        dziennik: ceny modeli, koszt wywołania, trace jednej wiadomości
   parser.py        Claude (structured outputs) → lista rekordów
   planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
   debts.py         długi bez stałych rat i kredyty ratalne (etykiety w Wallet)

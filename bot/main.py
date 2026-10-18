@@ -44,6 +44,12 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
                         await notify(reply)
         except Exception:
             log.exception("Błąd pętli przypomnień")
+        try:
+            if alert := core.budget_alert():  # koszt modelu ponad LLM_BUDGET_USD — raz w miesiącu
+                for notify in notifiers:
+                    await notify(alert)
+        except Exception:
+            log.exception("Limit kosztu modelu")
         if synced_on != now.date() and now.hour >= core.cfg.reminder_hour:
             try:
                 await core.investments.sync_accounts()

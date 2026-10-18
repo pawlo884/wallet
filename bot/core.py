@@ -10,10 +10,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
+from . import events
 from .config import Config
 from .debts import Debts, parse_debt_command
 from .fx import FX, FXError, resolve_code
 from .investments import Holding, Investments
+from .lists import Lists
 from .memory import Memory, short_id
 from .strava import Strava, StravaError
 from .statement import Reconciler, email_to_text, looks_like_statement
@@ -21,6 +23,7 @@ from .stt import STT
 from .parser import SYSTEM_TEMPLATE, ParsedRecord, RecordParser
 from .planned import Payment, Planned
 from .session import Session
+from .store import Store, day_start, month_start
 from .wallet_api import UNKNOWN_EXPENSE, UNKNOWN_INCOME, WalletAPI, WalletError
 
 log = logging.getLogger(__name__)
@@ -30,6 +33,7 @@ DRAFT_TTL = 24 * 3600
 SAVED_TTL = 7 * 24 * 3600  # „Cofnij” i „zmień na…” po zapisie
 HISTORY_TTL = 30 * 60  # pamięć rozmowy: ostatnie 30 min
 HISTORY_TURNS = 8  # i najwyżej tyle wiadomości (user + bot)
+LIST_ACTIONS = {"iu", "tk", "td", "tp", "tn", "tx", "txy", "bk", "bs", "bx", "bxy"}
 
 
 @dataclass
@@ -107,6 +111,10 @@ class Core:
         self._last_draft: dict[str, str] = self.session.dict("last_draft", DRAFT_TTL)  # właściciel → klucz ostatniego szkicu
         self._last_saved: dict[str, str] = self.session.dict("last_saved", SAVED_TTL)  # właściciel → klucz ostatnio zapisanych rekordów
         self.planned = Planned(self)
+        # Baza asystenta: zadania, książki, dziennik zdarzeń (data/assistant.db)
+        self.store = Store(Path(cfg.state_file).with_name("assistant.db"))
+        self.lists = Lists(self, self.store)
+        self.parser.on_usage = self._log_usage
 
     # ---------- katalog kont i kategorii ----------
 
@@ -206,11 +214,25 @@ class Core:
     async def handle_message(
         self, owner: str, text: str, images: list[tuple[bytes, str]]
     ) -> Reply | list[Reply]:
-        if not images and looks_like_statement(text):  # wklejony/udostępniony wyciąg z banku
-            return await self.statement(owner, text)
-        reply = await self._handle_message(owner, text, images)
-        self.remember(owner, "user", ("[zdjęcie] " if images else "") + (text or ""))
-        self.remember(owner, "assistant", reply.text)
+        trace = events.new_trace()
+        started = time.monotonic()
+        shown = ("[zdjęcie] " if images else "") + (text or "")
+        try:
+            if not images and looks_like_statement(text):  # wklejony/udostępniony wyciąg z banku
+                events.agent_var.set("wydatki")
+                reply = await self.statement(owner, text)
+            else:
+                reply = await self._handle_message(owner, text, images)
+                self.remember(owner, "user", shown)
+                self.remember(owner, "assistant", reply.text)
+        except Exception as e:
+            self.store.log_event("error", trace=trace, agent=events.agent_var.get(), name="wiadomość",
+                                 input=shown, output=repr(e), ms=_ms(started))
+            raise
+        first = reply[0] if isinstance(reply, list) else reply
+        self.store.log_event("message", trace=trace, agent=events.agent_var.get(), input=shown,
+                             output=first.text, ms=_ms(started))
+        self.store.tag_trace(trace, events.agent_var.get())  # wywołania modelu sprzed decyzji, kto obsłużył
         return reply
 
     async def statement(self, owner: str, text: str, source: str = "wyciągu") -> list[Reply]:
@@ -238,11 +260,27 @@ class Core:
             return Reply(f"⚠️ Nie mogę połączyć się z Wallet: {e}")
         result = await self.parser.parse(
             text, images, self.today(), self._catalog_prompt, self._history_messages(owner),
-            memory=self.memory.prompt_block(),
+            memory=self.memory.prompt_block(), lists=self.lists.prompt_block(),
         )
+        agents = (["wydatki"] if result.records else []) + (["zadania"] if result.tasks else []) + (
+            ["ksiazki"] if result.books else [])
+        events.agent_var.set("+".join(agents) or "wydatki")
+        # Zadania i książki od razu na listę (z ↩️ Cofnij); transakcje jak dotąd jako szkic do ✅.
+        item_lines, undo_key = self.lists.apply(result.tasks, result.books)
         if not result.records:
-            return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
+            if not item_lines:
+                return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
+            if result.question:
+                item_lines.append(f"\n❓ {result.question}")
+            return Reply("\n".join(item_lines), [("↩️ Cofnij", f"iu:{undo_key}")] if undo_key else [])
+        reply = await self._records_reply(owner, text, result)
+        if item_lines:
+            reply.text = "\n".join(item_lines) + "\n\n" + reply.text
+            if undo_key:
+                reply.buttons.append(("↩️ Cofnij listę", f"iu:{undo_key}"))
+        return reply
 
+    async def _records_reply(self, owner: str, text: str, result) -> Reply:
         records = [self._sanitize(r) for r in result.records]
         self._apply_memory(records)
         for r in records:  # notatka zawsze — żeby po miesiącach było wiadomo, na co to poszło
@@ -291,12 +329,20 @@ class Core:
         return Reply("\n".join(lines), [(ok_label, f"ok:{key}"), ("❌ Anuluj", f"no:{key}")])
 
     async def handle_callback(self, owner: str, data: str) -> Reply:
+        trace = events.new_trace()
+        started = time.monotonic()
         reply = await self._handle_callback(owner, data)
         self.remember(owner, "assistant", reply.text)  # żeby „zmień na 45” wiedziało, co zapisano
+        action = data.partition(":")[0]
+        agent = "wydatki" if action not in LIST_ACTIONS else "listy" if action == "iu" else (
+            "ksiazki" if action.startswith("b") else "zadania")
+        self.store.log_event("button", trace=trace, agent=agent, input=data, output=reply.text, ms=_ms(started))
         return reply
 
     async def _handle_callback(self, owner: str, data: str) -> Reply:
         action, _, key = data.partition(":")
+        if action in LIST_ACTIONS:
+            return self.lists.handle_callback(action, key)
         if action in ("sp", "sa", "ss", "pk"):
             return await self.planned.handle_callback(owner, action, key)
         if action in ("ia", "in", "ir", "iry"):
@@ -926,14 +972,83 @@ class Core:
             return Reply(f"⚠️ Nie udało się policzyć prognozy: {e}")
         return Reply(forecast.summary_text(data, self.cfg.forecast_url))
 
+    # ---------- zadania, książki, dziennik ----------
+
+    def _log_usage(self, name: str, model: str, usage, ms: int) -> None:
+        self.store.log_event(
+            "llm", trace=events.trace_var.get(), agent=events.agent_var.get(), name=name, model=model,
+            tokens_in=events.tokens_in(usage), tokens_out=getattr(usage, "output_tokens", 0),
+            cost_usd=events.cost_usd(model, usage), ms=ms,
+        )
+
+    async def tasks_list(self) -> Reply:
+        return self.lists.tasks_view()
+
+    async def books_list(self) -> Reply:
+        return self.lists.books_view()
+
+    async def add_item(self, owner: str, kind: str, text: str) -> Reply | list[Reply]:
+        """/zadanie i /ksiazka: to samo co zwykła wiadomość, z jasną intencją dla modelu."""
+        from .lists import BOOKS_HELP, TASKS_HELP
+
+        if not text.strip():
+            return Reply(TASKS_HELP if kind == "task" else BOOKS_HELP)
+        return await self.handle_message(owner, f"{'Dodaj zadanie' if kind == 'task' else 'Dodaj książkę'}: {text}", [])
+
+    async def event_log(self) -> Reply:
+        tz = self.cfg.tz
+        month, calls = self.store.cost_since(month_start(tz))
+        today, _ = self.store.cost_since(day_start(tz))
+        rows = self.store.recent_events(15)
+        lines = [f"🔎 *Dziennik* (ostatnie {len(rows)})"]
+        icons = {"message": "💬", "button": "🔘", "command": "⌨️", "llm": "🧠", "notify": "🔔", "error": "⚠️"}
+        for e in rows:
+            at = datetime.fromtimestamp(e["at"], tz).strftime("%d.%m %H:%M")
+            who = f"[{e['agent']}] " if e["agent"] else ""
+            if e["kind"] == "llm":
+                what = f"{e['name']} · {e['tokens_in']}→{e['tokens_out']} tok · ${e['cost_usd']:.4f}"
+            else:
+                what = (e["input"] or e["name"] or "").replace("\n", " ")[:50]
+            took = f" · {e['ms'] / 1000:.1f}s" if e["ms"] else ""
+            lines.append(f"{icons.get(e['kind'], '•')} `{at}` {who}{_md_safe(what)}{took}")
+        limit = f" z limitu ${self.cfg.llm_budget_usd:.2f}" if self.cfg.llm_budget_usd else ""
+        lines.append(f"\n💵 Model: dziś {_usd(today)}, w tym miesiącu *{_usd(month)}*{limit} (wywołania: {calls})")
+        return Reply("\n".join(lines))
+
+    def budget_alert(self) -> Reply | None:
+        """Raz w miesiącu: koszt modelu przekroczył LLM_BUDGET_USD."""
+        limit = self.cfg.llm_budget_usd
+        if not limit:
+            return None
+        spent, _ = self.store.cost_since(month_start(self.cfg.tz))
+        month = self.today().strftime("%Y-%m")
+        if spent < limit or self.store.get("budget_alert") == month:
+            return None
+        self.store.set("budget_alert", month)
+        return Reply(f"💵 Koszt modelu w tym miesiącu: *${spent:.2f}*, limit ${limit:.2f}. "
+                     "Sprawdź `/log`, co zużywa najwięcej, albo podnieś `LLM_BUDGET_USD`.")
+
     async def close(self) -> None:
+        self.store.close()
         await self.wallet.close()
         await self.fx.close()
         await self.investments.close()
         await self.strava.close()
 
 
-HELP = """👋 Zapisuję wydatki i przychody do Wallet.
+def _ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def _md_safe(s: str) -> str:
+    return s.replace("*", "").replace("_", " ").replace("`", "'").replace("[", "(").replace("]", ")")
+
+
+def _usd(v: float) -> str:
+    return f"${v:.3f}" if v < 1 else f"${v:.2f}"
+
+
+HELP = """👋 Zapisuję wydatki i przychody do Wallet, a do tego pilnuję zadań i książek.
 
 Po prostu napisz, np.:
 • `biedronka 54,30`
@@ -957,9 +1072,13 @@ Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
+🗒 Zadania: napisz `jutro zadzwonić do ubezpieczyciela` · lista: `/zadania` · odhaczanie: „zadzwoniłem…” albo przycisk
+📚 Książki: wyślij *screena* okładki, sklepu albo półki, albo napisz `chcę przeczytać Sapiensa` · lista: `/ksiazki`
+🔎 Co robiłem i ile kosztował model: `/log`
+
 Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
 
-Komendy: saldo · miesiac · pamiec · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · lotto · kurs · wyciag · korekta · odswiez · pomoc"""
+Komendy: zadania · zadanie · ksiazki · ksiazka · saldo · miesiac · pamiec · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · lotto · kurs · wyciag · korekta · odswiez · log · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`
