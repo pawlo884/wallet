@@ -59,6 +59,24 @@ class BookAction(BaseModel):
     )
 
 
+class BookSeen(BaseModel):
+    title: str = Field(description="Tytuł dokładnie tak, jak widać na okładce (bez autora)")
+    author: str | None = Field(description="Autor z okładki; inaczej null")
+    status: Literal["to_buy", "to_read", "reading", "read"]
+
+
+class BooksResult(BaseModel):
+    books: list[BookSeen] = Field(default_factory=list)
+
+
+BOOKS_INSTRUCTIONS = """Jakie książki pokazuje użytkownik na tych zdjęciach? Bierz książki, które są tematem
+zdjęcia: okładka z przodu, trzymana w ręce, wskazywana palcem, na środku kadru, albo pozycje na zrzucie
+listy/sklepu/półki. Kadr z filmiku (TikTok, Instagram) też się liczy. Pomijaj książki w tle, w stosach i same
+grzbiety. Tytuł i autora przepisz z okładki; nie zgaduj — nieczytelny tytuł pomiń. Każda książka raz.
+status: to_buy, chyba że podpis użytkownika mówi inaczej ("mam" → to_read, "czytam" → reading,
+"przeczytałem" → read). Brak książek → pusta lista."""
+
+
 class ParseResult(BaseModel):
     records: list[ParsedRecord]
     tasks: list[TaskAction] = Field(
@@ -201,7 +219,8 @@ Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (
 - Ze zdjęcia bierz TYLKO książki, które są głównym tematem: okładka z przodu, trzymana w ręce, wskazywana
   palcem albo na środku kadru, z czytelnym tytułem. Pomijaj książki w tle, w stosach, na półkach i same
   grzbiety, chyba że cały screen to lista/półka. Nie zgaduj ani nie dopowiadaj tytułów: tylko to, co da się
-  przeczytać; tytuł nieczytelny → pomiń. Napisy z interfejsu (TikTok, Instagram, przyciski) to nie książki.
+  przeczytać; tytuł nieczytelny → pomiń. Kadr z filmiku (TikTok, Instagram, YouTube), na którym ktoś
+  pokazuje książkę, to też książka do dodania — pomijasz tylko napisy samego interfejsu (lajki, przyciski).
 - Zrzut ekranu lub zdjęcie z książkami (okładka, strona sklepu, lista, półka), które nie jest
   potwierdzeniem zakupu → tylko books (każda widoczna książka osobno, z autorem, jeśli widać), records=[].
   Potwierdzenie zakupu / paragon z książkami → records (wydatek) ORAZ books ze statusem to_read.
@@ -293,6 +312,22 @@ class RecordParser:
                 records=[], amends=False, question="Nie udało mi się tego odczytać. Napisz np. „biedronka 54,30”."
             )
         return response.parsed_output
+
+    async def parse_books(self, images: list[tuple[bytes, str]], text: str) -> list[BookAction]:
+        """Druga próba, gdy główny parser nic nie znalazł na zdjęciach: samo pytanie o książki."""
+        content: list[dict] = [
+            {"type": "image", "source": {"type": "base64", "media_type": mt,
+                                         "data": base64.standard_b64encode(data).decode()}}
+            for data, mt in images
+        ]
+        content.append({"type": "text", "text": f"{BOOKS_INSTRUCTIONS}\n\nPodpis użytkownika: {text or '(brak)'}"})
+        response = await self._call(
+            "parse_books", max_tokens=1500, messages=[{"role": "user", "content": content}], output_format=BooksResult,
+        )
+        if response.stop_reason == "refusal" or response.parsed_output is None:
+            return []
+        return [BookAction(action="add", book_id=None, title=b.title, author=b.author, status=b.status)
+                for b in response.parsed_output.books if b.title.strip()]
 
     async def parse_statement(self, text: str, today: date, catalog_prompt: str, memory: str = "") -> ParseResult:
         response = await self._call(
