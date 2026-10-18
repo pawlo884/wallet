@@ -141,6 +141,9 @@ Zasady:
   "obiad z Karoliną", "paliwo do A6", "prezent dla mamy". Zachowaj szczegóły z wiadomości
   użytkownika. Przy paragonie wymień główne pozycje (max ~6), np. "mleko, chleb, masło, karma dla psa".
   Gdy wiadomość nic nie mówi ponad sklep ("biedronka 54,30"), opisz ogólnie: "zakupy spożywcze".
+- Gry losowe (Lotto, Eurojackpot, Mini Lotto, zdrapki, wpłata na lotto.pl): kupon/wpłata = expense,
+  wygrana = income, obie w kategorii loterii/hazardu ("Lottery, gambling"). W note ZAWSZE nazwa gry,
+  np. "kupon Eurojackpot", "wygrana Lotto" — po niej bot liczy bilans gier (/lotto).
 - Gdy wiadomość nie opisuje transakcji albo brak kwoty: records = [] i zadaj pytanie w question.
 
 Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:

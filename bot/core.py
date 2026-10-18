@@ -834,6 +834,14 @@ class Core:
             [("🔗 Autoryzuj w Stravie", s.auth_url())],
         )
 
+    async def lotto_report(self) -> Reply:
+        from . import lotto
+
+        try:
+            return Reply(lotto.text(await lotto.analyze(self)))
+        except WalletError as e:
+            return Reply(f"⚠️ {e}")
+
     async def multisport_report(self) -> Reply:
         from . import multisport
 
@@ -944,13 +952,14 @@ Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
 Inwestycje: `/inwestycja srebro 2 uncje` · wycena: `/inwestycje`
 Multisport: opłacalność ze Stravy — `/multisport`
+Lotto i Eurojackpot: wydane, wygrane, zwrot i szanse — `/lotto`
 Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
 
 Saldo się nie zgadza z bankiem? `/korekta 2345,67` (albo `/korekta awaryjne 500`).
 
-Komendy: saldo · miesiac · pamiec · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · kurs · wyciag · korekta · odswiez · pomoc"""
+Komendy: saldo · miesiac · pamiec · prognoza · zaplanowane · plan · plany · dlug · dlugi · inwestycje · multisport · lotto · kurs · wyciag · korekta · odswiez · pomoc"""
 
 PLAN_HELP = """🗓 Dodawanie płatności cyklicznej — opisz ją po ludzku, np.:
 • `/plan netflix 49 co miesiąc 15-go`

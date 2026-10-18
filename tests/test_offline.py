@@ -830,3 +830,45 @@ async def memory_test():
 
 
 asyncio.run(memory_test())
+
+
+async def lotto_test():
+    """/lotto: bilans gier z kategorii Lottery na prawdziwym kształcie rekordów Wallet + szanse."""
+    import tempfile
+    from pathlib import Path
+    from bot import lotto
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "s.json"), SCHEDULE_FILE="config/schedule.yaml")
+    L = lotto.LOTTERY
+    rows = [(43.3, "Wygrana EuroJackpot", "2026-10-16"), (-113, "wpłata na lotto", "2026-10-04"),
+            (-100, "eurojackpot", "2026-02-24"), (-40, "eurojackot", "2026-02-12"),
+            (-100, "EuroJackpot", "2025-12-15"), (-50, "EuroJackpot", "2025-12-02")]
+
+    class LottoWallet(FakeWallet):
+        async def records(self, date_from, date_to, **k):
+            assert k["categoryId"] == L and date_from == "2000-01-01" and k["accountId"] == "pln,eur", k
+            return [{"amount": {"value": v}, "note": n, "recordDate": f"{d}T10:00:00Z", "category": {"id": L}}
+                    for v, n, d in rows]
+
+    core = Core(Config())
+    core.wallet, core.parser = LottoWallet(), FakeParser()
+    core.today = lambda: __import__("datetime").date(2026, 10, 18)
+    t = (await core.lotto_report()).text
+    print(t)
+    assert "Wydane: −403,00 PLN" in t and "Wygrane: 43,30 PLN" in t and "Bilans: *−359,70 PLN*" in t
+    assert "Zwrot: 11%" in t and "Największa wygrana: 43,30 PLN (Eurojackpot, 16.10.2026)" in t
+    assert "Eurojackpot: wydane −290,00 PLN" in t and "Lotto: wydane −113,00 PLN" in t
+    assert "główna wygrana 1 : 139 838 160" in t and "główna wygrana 1 : 13 983 816" in t
+    top, anyp = lotto.ODDS["Eurojackpot"]
+    assert round(1 / anyp) == 32, "oficjalnie ~1:32"
+    assert round(1 / lotto.ODDS["Lotto"][1]) == 54
+    assert lotto.game_of({"note": "kupon"}) == "Inne"
+
+    class Empty(FakeWallet):
+        async def records(self, *a, **k): return []
+    core.wallet = Empty()
+    assert "Nie widzę" in (await core.lotto_report()).text
+    print("\nOK lotto")
+
+
+asyncio.run(lotto_test())

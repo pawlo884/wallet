@@ -31,6 +31,7 @@ COMMANDS = [
     ("inwestycje", "Wycena inwestycji (srebro, złoto, ETF)"),
     ("inwestycja", "Dodaj inwestycję, np. /inwestycja srebro 2 uncje"),
     ("multisport", "Czy karta Multisport się opłaca (Strava)"),
+    ("lotto", "Lotto i Eurojackpot: wydane, wygrane, zwrot, szanse"),
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
     ("korekta", "Popraw saldo do stanu z banku, np. /korekta 2345,67"),
@@ -147,6 +148,7 @@ def build(core: Core) -> Application:
     app.add_handler(CommandHandler("inwestycja", on_inwestycja, filters=user_filter))
     app.add_handler(CommandHandler("inwestycje", cmd(core.investments_list), filters=user_filter))
     app.add_handler(CommandHandler("multisport", cmd(core.multisport_report), filters=user_filter))
+    app.add_handler(CommandHandler("lotto", cmd(core.lotto_report), filters=user_filter))
 
     async def on_strava(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, await core.strava_connect(" ".join(ctx.args or [])))
