@@ -7,12 +7,30 @@ export interface Task {
   id: number;
   title: string;
   due: string | null;
+  due_time: string | null; // HH:MM; null = cały dzień
+  gcal_id: string | null; // wydarzenie w Kalendarzu Google
   status: "open" | "done";
   moves: number;
   created_at: number;
   done_at: number | null;
   due_label: string;
   overdue: boolean;
+}
+
+// Wydarzenie z Twoich kalendarzy Google (bez kalendarza „Zadania”)
+export interface CalEvent {
+  title: string;
+  calendar: string;
+  all_day: boolean;
+  start: string; // YYYY-MM-DD (cały dzień) albo YYYY-MM-DDTHH:MM
+  end: string;
+}
+
+export interface TasksData {
+  open: Task[];
+  done: Task[];
+  google: boolean;
+  calendar: CalEvent[];
 }
 
 export interface Book {
@@ -87,9 +105,10 @@ const send = <T>(method: string, path: string, body?: unknown) =>
 
 export const api = {
   overview: () => request<Overview>("/overview"),
-  tasks: () => request<{ open: Task[]; done: Task[] }>("/tasks"),
-  addTask: (title: string, due: string | null) => send<Task>("POST", "/tasks", { title, due }),
-  updateTask: (id: number, patch: Partial<Pick<Task, "title" | "due" | "status">>) =>
+  tasks: () => request<TasksData>("/tasks"),
+  addTask: (title: string, due: string | null, due_time: string | null) =>
+    send<Task>("POST", "/tasks", { title, due, due_time }),
+  updateTask: (id: number, patch: Partial<Pick<Task, "title" | "due" | "due_time" | "status">>) =>
     send<Task>("PATCH", `/tasks/${id}`, patch),
   deleteTask: (id: number) => send<{ ok: true }>("DELETE", `/tasks/${id}`),
   books: () => request<{ books: Book[]; statuses: Record<BookStatus, string> }>("/books"),

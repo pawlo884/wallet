@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
-from .lists import fmt_due
+from .lists import _valid_time, fmt_when
 from .store import BOOK_STATUSES, day_start, month_start
 
 if TYPE_CHECKING:
@@ -53,12 +53,20 @@ def _due(value) -> str | None:
         raise web.HTTPBadRequest(text="Termin w formacie YYYY-MM-DD")
 
 
+def _time(value) -> str | None:
+    if value in (None, ""):
+        return None
+    if not (t := _valid_time(str(value))):
+        raise web.HTTPBadRequest(text="Godzina w formacie HH:MM")
+    return t
+
+
 def routes(core: "Core") -> list[web.RouteDef]:
     store = core.store
 
     def task_json(t) -> dict:
         d = asdict(t)
-        d["due_label"] = fmt_due(t.due_date, core.today())
+        d["due_label"] = fmt_when(t, core.today())
         d["overdue"] = bool(t.due_date and t.due_date < core.today() and t.status == "open")
         return d
 
@@ -100,6 +108,8 @@ def routes(core: "Core") -> list[web.RouteDef]:
         return _json({
             "open": [task_json(t) for t in store.open_tasks()],
             "done": [task_json(t) for t in reversed(store.done_tasks_since(week_ago))],
+            "google": core.gcal.connected,
+            "calendar": await core.calendar_events(core.today(), 7),  # Twoje wydarzenia na 7 dni
         })
 
     async def task_create(request: web.Request) -> web.Response:
@@ -107,7 +117,8 @@ def routes(core: "Core") -> list[web.RouteDef]:
         title = str(data.get("title") or "").strip()
         if not title:
             return _err("Podaj tytuł zadania")
-        t = store.add_task(title, _due(data.get("due")))
+        t = store.add_task(title, _due(data.get("due")), _time(data.get("due_time")))
+        core.calendar_sync(t.id)
         logged("task_add", {"id": t.id, "title": t.title})
         return _json(task_json(t), 201)
 
@@ -118,14 +129,18 @@ def routes(core: "Core") -> list[web.RouteDef]:
         data = await _body(request)
         if "title" in data and str(data["title"]).strip():
             store.set_task(t.id, title=str(data["title"]).strip()[:200])
-        if "due" in data:
-            due = _due(data["due"])
+        if "due" in data or "due_time" in data:
+            due = _due(data["due"]) if "due" in data else t.due
+            hhmm = _time(data["due_time"]) if "due_time" in data else t.due_time
             if due != t.due:
-                store.postpone_task(t.id, due)
+                store.postpone_task(t.id, due, hhmm)
+            elif hhmm != t.due_time and due:
+                store.set_task(t.id, due_time=hhmm)  # inna godzina tego samego dnia to nie przesunięcie
         if data.get("status") == "done" and t.status != "done":
             store.finish_task(t.id)
         elif data.get("status") == "open" and t.status != "open":
             store.set_task(t.id, status="open", done_at=None)
+        core.calendar_sync(t.id)
         logged("task_update", {"id": t.id, **data})
         return _json(task_json(store.task(t.id)))
 
@@ -133,7 +148,7 @@ def routes(core: "Core") -> list[web.RouteDef]:
         t = store.task(int(request.match_info["id"]))
         if not t:
             return _err("Nie ma takiego zadania", 404)
-        store.delete_task(t.id)
+        core.lists.delete_task(t.id)
         logged("task_delete", {"id": t.id, "title": t.title})
         return _json({"ok": True})
 

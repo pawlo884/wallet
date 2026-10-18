@@ -38,6 +38,8 @@ domeny ani HTTPS** na VPS.
 | `/multisport` | czy karta Multisport się opłaca: wejścia ze Stravy, koszt wejścia, próg opłacalności |
 | `/lotto` | Eurojackpot: ile wydane, ile wygrane, zwrot, szanse na wygraną |
 | `/strava` | jednorazowe połączenie konta Strava (OAuth) |
+| `/google` | jednorazowe połączenie z Kalendarzem Google (OAuth) |
+| `/kalendarz` | dziś i jutro: spotkania z Kalendarza Google i zadania z terminem |
 | `/pamiec` | zapamiętani sprzedawcy (kategoria, konto) i zapominanie |
 | `jutro zadzwonić do ubezpieczyciela` | nowe zadanie z terminem (bez transakcji) |
 | `/zadania` | zaległe, dziś, najbliższe i bez terminu; przyciski ☑️ zrobione / ⏭ jutro / 📅 za tydzień |
@@ -83,6 +85,27 @@ na 📚 *do przeczytania*.
 - **Książki** mają cztery statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane.
   Screen strony sklepu albo listy życzeń = do kupienia, screen półki/biblioteki („mam”) = do przeczytania.
   Każda widoczna książka osobno, z autorem. Ta sama książka drugi raz nie jest dublowana.
+
+### Kalendarz Google
+
+Po jednorazowym `/google` zadania z terminem są wydarzeniami w osobnym kalendarzu **„Zadania”** (bot
+zakłada go sam): bez godziny jako całodniowe, z godziną („jutro o 15 zadzwonić do ZUS”) jako 30 minut.
+Odhaczenie, przesunięcie i usunięcie — w bocie albo w panelu — zmienia wydarzenie; zrobione zostają
+w kalendarzu jako „✅ …” na szaro. Bot czyta też Twoje widoczne kalendarze: dzisiejsze spotkania są
+w `/zadania`, dziś i jutro w `/kalendarz`, 7 dni w panelu, a przy zadaniu z godziną bot ostrzega
+„⚠️ O 15:00 masz już: …”. Zmiany wydarzeń wprost w Google nie wracają do listy zadań.
+
+Konfiguracja (raz):
+1. https://console.cloud.google.com → nowy projekt → *APIs & Services → Library* → **Google Calendar API** → Enable.
+2. *OAuth consent screen*: User type **External**, nazwa dowolna, Twój e-mail; potem **Publish app**
+   (w trybie *Testing* Google unieważnia dostęp po 7 dniach). Weryfikacja nie jest potrzebna.
+3. *Credentials → Create credentials → OAuth client ID*, typ **Desktop app**.
+4. `GOOGLE_CLIENT_ID` i `GOOGLE_CLIENT_SECRET` do `.env`, `docker compose up -d`.
+5. W bocie `/google` → przycisk → zgoda (przy „aplikacja niezweryfikowana”: *Zaawansowane → Przejdź*)
+   → skopiuj adres `http://localhost/?code=…` z paska → `/google <adres>`.
+
+Tokeny i ID kalendarza leżą w `data/google.json` na wolumenie. Błędy synchronizacji widać w `/log`
+i w panelu (agent „kalendarz”); bot działa dalej bez kalendarza.
 
 ## Baza i dziennik zdarzeń
 
@@ -274,6 +297,7 @@ bot/
   multisport.py    opłacalność karty Multisport
   lotto.py         Eurojackpot: bilans, zwrot, szanse (kategoria Lottery, gambling)
   strava.py        połączenie ze Stravą (OAuth, aktywności)
+  gcal.py          Kalendarz Google (OAuth, kalendarz „Zadania”, odczyt wydarzeń, kolizje)
   fx.py            kursy NBP
   stt.py           mowa → tekst (faster-whisper, lokalnie)
 frontend/          panel w React (Vite + Tailwind), budowany w Dockerfile

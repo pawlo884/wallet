@@ -1,5 +1,6 @@
 """Zadania i książki: zastosowanie akcji z modelu, widoki /zadania i /ksiazki, przyciski."""
 
+import re
 import secrets
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -29,13 +30,20 @@ def fmt_due(d: date | None, today: date) -> str:
     return f"{d:%d.%m.%Y}"
 
 
+def fmt_when(t: Task, today: date) -> str:
+    """Termin zadania z godziną: „jutro o 15:00”."""
+    when = fmt_due(t.due_date, today)
+    return f"{when} o {t.due_time}" if when and t.due_time else when
+
+
 class Lists:
     def __init__(self, core: "Core", store: Store):
         self.core = core
         self.store = store
         # klucz → lista operacji do cofnięcia: ["task_add", id] | ["book_add", id] | ["book_status", id, stary]
-        #   | ["task_done", id] | ["task_due", id, stary_termin]
+        #   | ["task_done", id] | ["task_due", id, stary_termin, stara_godzina]
         self._undo = core.session.dict("lists_undo", UNDO_TTL)
+        self.changed: list[int] = []  # zadania dodane/przesunięte przez ostatnie apply() (ostrzeżenie o kolizji)
 
     # ---------- blok dla modelu ----------
 
@@ -44,10 +52,10 @@ class Lists:
         tasks = self.store.open_tasks()[:60]
         books = [b for b in self.store.books() if b.status != "read"][:80]
         lines = ["ZADANIA (otwarte; id | tytuł | termin):"]
-        lines += [f"{t.id} | {t.title} | {t.due or '-'}" for t in tasks] or ["(brak)"]
+        lines += [f"{t.id} | {t.title} | {t.due or '-'}{' ' + t.due_time if t.due_time else ''}" for t in tasks] or ["(brak)"]
         lines.append("\nKSIĄŻKI (id | tytuł | autor | status):")
         lines += [f"{b.id} | {b.title} | {b.author or '-'} | {b.status}" for b in books] or ["(brak)"]
-        lines.append(f"\n(dziś {today.isoformat()})")
+        lines.append(f"\n(teraz {today.isoformat()} {self.core.now():%H:%M})")
         return "\n".join(lines)
 
     # ---------- akcje z modelu ----------
@@ -57,14 +65,17 @@ class Lists:
         today = self.core.today()
         lines: list[str] = []
         undo: list[list] = []
+        self.changed = []
         for a in tasks:
             due = _valid_date(a.due)
+            hhmm = _valid_time(a.time)
             if a.action == "add":
                 if not a.title.strip():
                     continue
-                t = self.store.add_task(a.title, due.isoformat() if due else None)
+                t = self.store.add_task(a.title, due.isoformat() if due else None, hhmm)
                 undo.append(["task_add", t.id])
-                when = fmt_due(t.due_date, today)
+                self._changed(t.id)
+                when = fmt_when(t, today)
                 lines.append(f"✅ Nowe zadanie: *{t.title}*" + (f" ({when})" if when else ""))
                 continue
             t = self.store.task(a.task_id or 0)
@@ -74,11 +85,13 @@ class Lists:
             if a.action == "done":
                 self.store.finish_task(t.id)
                 undo.append(["task_done", t.id])
+                self.core.calendar_sync(t.id)
                 lines.append(f"☑️ Zrobione: ~{t.title}~")
             else:  # postpone
-                self.store.postpone_task(t.id, due.isoformat() if due else None)
-                undo.append(["task_due", t.id, t.due])
-                lines.append(f"⏭ Przesunięte: *{t.title}* → {fmt_due(due, today) or 'bez terminu'}")
+                self.store.postpone_task(t.id, due.isoformat() if due else None, hhmm or t.due_time)
+                undo.append(["task_due", t.id, t.due, t.due_time])
+                self._changed(t.id)
+                lines.append(f"⏭ Przesunięte: *{t.title}* → {fmt_when(self.store.task(t.id), today) or 'bez terminu'}")
         for a in books:
             if a.action == "add" or not (b := self.store.book(a.book_id or 0)):
                 if not a.title.strip():
@@ -108,31 +121,48 @@ class Lists:
         for op in reversed(ops):
             kind, oid = op[0], op[1]
             if kind == "task_add":
-                self.store.delete_task(oid)
+                self.delete_task(oid)
             elif kind == "task_done":
                 self.store.set_task(oid, status="open", done_at=None)
+                self.core.calendar_sync(oid)
             elif kind == "task_due":
-                self.store.set_task(oid, due=op[2])
+                self.store.set_task(oid, due=op[2], due_time=op[3] if len(op) > 3 else None)
+                self.core.calendar_sync(oid)
             elif kind == "book_add":
                 self.store.delete_book(oid)
             elif kind == "book_status":
                 self.store.set_book_status(oid, op[2])
         return "↩️ Cofnięte."
 
+    def _changed(self, tid: int) -> None:
+        self.changed.append(tid)
+        self.core.calendar_sync(tid)
+
+    def delete_task(self, tid: int) -> None:
+        """Usuwa zadanie razem z wydarzeniem w kalendarzu."""
+        t = self.store.task(tid)
+        self.store.delete_task(tid)
+        if t and t.gcal_id:
+            self.core.calendar_delete(t.gcal_id)
+
     # ---------- /zadania ----------
 
-    def tasks_view(self) -> "Reply":
+    def tasks_view(self, calendar: list[dict] | None = None) -> "Reply":
+        """calendar: dzisiejsze wydarzenia z Kalendarza Google (gdy połączony)."""
         from .core import Reply
+        from .core import _md_safe
+        from .gcal import event_line
 
         today = self.core.today()
         tasks = self.store.open_tasks()
+        cal = [f"\n*📅 W kalendarzu dziś*"] + [_md_safe(event_line(e)) for e in calendar] if calendar else []
         if not tasks:
-            return Reply(TASKS_HELP)
+            return Reply("\n".join([TASKS_HELP] + cal))
         overdue = [t for t in tasks if t.due_date and t.due_date < today]
         now = [t for t in tasks if t.due_date == today]
         soon = [t for t in tasks if t.due_date and t.due_date > today]
         later = [t for t in tasks if not t.due_date]
-        lines = [f"🗒 *Zadania ({len(tasks)})*"]
+        lines = [f"🗒 *Zadania ({len(tasks)})*"] + cal
         for title, group in (("⚠️ Zaległe", overdue), ("📌 Dziś", now), ("🗓 Najbliższe", soon), ("💭 Bez terminu", later)):
             if group:
                 lines.append(f"\n*{title}*")
@@ -146,7 +176,7 @@ class Lists:
 
     @staticmethod
     def _task_line(t: Task, today: date) -> str:
-        when = fmt_due(t.due_date, today)
+        when = fmt_when(t, today)
         moved = f" · przesuwane {t.moves}×" if t.moves >= 2 else ""
         return f"• {t.title}" + (f" — {when}" if when else "") + moved
 
@@ -189,7 +219,7 @@ class Lists:
             if not t or (t.status != "open" and action != "txy"):
                 return Reply("Tego zadania już nie ma na liście.")
             if action == "tk":
-                when = fmt_due(t.due_date, today)
+                when = fmt_when(t, today)
                 return Reply(
                     f"🗒 *{t.title}*" + (f"\nTermin: {when}" if when else ""),
                     [("☑️ Zrobione", f"td:{t.id}"), ("⏭ Jutro", f"tp:{t.id}"), ("📅 Za tydzień", f"tn:{t.id}"),
@@ -197,16 +227,18 @@ class Lists:
                 )
             if action == "td":
                 self.store.finish_task(t.id)
+                self.core.calendar_sync(t.id)
                 left = len(self.store.open_tasks())
                 return Reply(f"☑️ Zrobione: ~{t.title}~\nZostało: {left}")
             if action in ("tp", "tn"):
                 due = today + timedelta(days=1 if action == "tp" else 7)
-                self.store.postpone_task(t.id, due.isoformat())
+                self.store.postpone_task(t.id, due.isoformat(), t.due_time)  # ta sama godzina, inny dzień
+                self.core.calendar_sync(t.id)
                 note = "\n_To już trzecie przesunięcie. Może rozbić je na mniejsze kroki albo skreślić?_" if t.moves + 1 >= 3 else ""
                 return Reply(f"⏭ *{t.title}* → {fmt_due(due, today)}{note}")
             if action == "tx":
                 return Reply(f"Usunąć zadanie *{t.title}*?", [("🗑 Tak", f"txy:{t.id}"), ("Zostaw", "keep:")])
-            self.store.delete_task(t.id)
+            self.delete_task(t.id)
             return Reply(f"🗑 Usunięto: {t.title}")
         # książki
         bid, _, status = key.partition(".")
@@ -238,6 +270,14 @@ def _valid_date(s: str | None) -> date | None:
         return None
 
 
+def _valid_time(s: str | None) -> str | None:
+    """'9:30' / '09:30' / '15' → 'HH:MM'; śmieci → None."""
+    m = re.fullmatch(r"\s*(\d{1,2})(?:[:.](\d{2}))?\s*", s or "")
+    if not m or int(m[1]) > 23 or int(m[2] or 0) > 59:
+        return None
+    return f"{int(m[1]):02d}:{m[2] or '00'}"
+
+
 def _day_start_ts(core: "Core") -> float:
     from datetime import datetime, time as dtime
 
@@ -246,6 +286,7 @@ def _day_start_ts(core: "Core") -> float:
 
 TASKS_HELP = """🗒 Lista zadań jest pusta. Napisz po prostu, np.:
 • `jutro zadzwonić do ubezpieczyciela`
+• `w piątek o 15 dentysta`
 • `do soboty wymienić opony`
 • `zadanie: oddać książkę do biblioteki`
 albo `/zadanie kupić prezent dla mamy`.

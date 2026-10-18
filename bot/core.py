@@ -17,6 +17,7 @@ from .fx import FX, FXError, resolve_code
 from .investments import Holding, Investments
 from .lists import Lists
 from .memory import Memory, short_id
+from .gcal import GoogleCalendar, GoogleError, conflicts, event_line
 from .strava import Strava, StravaError
 from .statement import Reconciler, email_to_text, looks_like_statement
 from .stt import STT
@@ -105,6 +106,9 @@ class Core:
         self.debts = Debts(self)
         self.investments = Investments(self)
         self.strava = Strava(self)
+        self.gcal = GoogleCalendar(self)  # zadania ↔ Kalendarz Google (data/google.json)
+        self._gcal_lock = asyncio.Lock()  # zmiany wysyłane po kolei, żeby nie zdublować wydarzenia
+        self._bg: set[asyncio.Task] = set()
         self.memory = Memory(self)  # sprzedawca → jak ostatnio zapisany (data/learned.json)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
@@ -172,6 +176,9 @@ class Core:
 
     def today(self) -> date:
         return datetime.now(self.cfg.tz).date()
+
+    def now(self) -> datetime:
+        return datetime.now(self.cfg.tz)
 
     def _cleanup(self) -> None:
         self._drafts.prune()
@@ -267,6 +274,7 @@ class Core:
         events.agent_var.set("+".join(agents) or "wydatki")
         # Zadania i książki od razu na listę (z ↩️ Cofnij); transakcje jak dotąd jako szkic do ✅.
         item_lines, undo_key = self.lists.apply(result.tasks, result.books)
+        item_lines += await self._calendar_warnings(self.lists.changed)
         if not result.records:
             if not item_lines:
                 return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
@@ -990,7 +998,128 @@ class Core:
         )
 
     async def tasks_list(self) -> Reply:
-        return self.lists.tasks_view()
+        today = self.today().isoformat()
+        evs = await self.calendar_events(self.today(), 1)
+        return self.lists.tasks_view([e for e in evs if e["start"][:10] <= today])  # wielodniowe też, gdy trwają
+
+    # ---------- Kalendarz Google (/google, /kalendarz) ----------
+
+    def calendar_sync(self, task_id: int) -> None:
+        """Po zmianie zadania: w tle zaktualizuj jego wydarzenie (bot nie czeka na Google)."""
+        if self.gcal.connected:
+            self._spawn(self._calendar_sync(task_id))
+
+    def calendar_delete(self, event_id: str) -> None:
+        if self.gcal.connected:
+            self._spawn(self._calendar_delete(event_id))
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    async def calendar_idle(self) -> None:
+        """Czeka, aż skończą się synchronizacje w tle (testy, zamykanie)."""
+        while self._bg:
+            await asyncio.gather(*list(self._bg), return_exceptions=True)
+
+    async def _calendar_sync(self, task_id: int) -> None:
+        async with self._gcal_lock:
+            t = self.store.task(task_id)  # stan z chwili wysyłki, nie z chwili zmiany
+            if not t:
+                return
+            try:
+                gid = await self.gcal.sync_task(t)
+                if not self.store.task(task_id):  # usunięte, zanim Google odpowiedział
+                    if gid:
+                        await self.gcal.delete_event(gid)
+                elif gid != t.gcal_id:
+                    self.store.set_task(task_id, gcal_id=gid)
+            except Exception as e:
+                log.warning("Kalendarz Google: zadanie %s: %r", task_id, e)
+                self.store.log_event("error", agent="kalendarz", name="gcal_sync", input=t.title, output=str(e)[:300])
+
+    async def _calendar_delete(self, event_id: str) -> None:
+        async with self._gcal_lock:
+            try:
+                await self.gcal.delete_event(event_id)
+            except Exception as e:
+                log.warning("Kalendarz Google: usuwanie %s: %r", event_id, e)
+                self.store.log_event("error", agent="kalendarz", name="gcal_delete", output=str(e)[:300])
+
+    async def calendar_events(self, start: date, days: int) -> list[dict]:
+        """Twoje wydarzenia z Kalendarza Google; pusto, gdy niepołączony albo Google nie odpowiada."""
+        if not self.gcal.connected:
+            return []
+        try:
+            return await asyncio.wait_for(self.gcal.events(start, days), 10)  # wolny Google nie blokuje listy
+        except Exception as e:
+            log.warning("Kalendarz Google: odczyt wydarzeń: %r", e)
+            return []
+
+    async def _calendar_warnings(self, task_ids: list[int]) -> list[str]:
+        out = []
+        for tid in task_ids:
+            t = self.store.task(tid)
+            if not t or not t.due_time or not t.due_date:
+                continue
+            clash = conflicts(await self.calendar_events(t.due_date, 1), t.due_date, t.due_time)
+            if clash:
+                out.append(f"⚠️ O {t.due_time} masz już: " + ", ".join(_md_safe(e["title"]) for e in clash))
+        return out
+
+    async def calendar_report(self) -> Reply:
+        """/kalendarz: dziś i jutro z Kalendarza Google oraz zadania z terminem."""
+        if not self.gcal.connected:
+            return await self.google_connect("")
+        today = self.today()
+        try:
+            evs = await self.gcal.events(today, 2)
+        except Exception as e:
+            return Reply(f"⚠️ Nie mogę odczytać kalendarza: {e}")
+        tasks = self.store.open_tasks()
+        lines = []
+        for label, d in (("Dziś", today), ("Jutro", today + timedelta(days=1))):
+            day_ev = [e for e in evs if e["start"][:10] == d.isoformat()]
+            day_t = [t for t in tasks if t.due_date == d]
+            lines.append(f"*{label}, {d:%d.%m}*")
+            lines += [_md_safe(event_line(e)) for e in day_ev]
+            lines += [f"🗒 {t.due_time or 'cały dzień'} {_md_safe(t.title)}" for t in day_t]
+            if not day_ev and not day_t:
+                lines.append("— wolne")
+            lines.append("")
+        return Reply("\n".join(lines).strip())
+
+    async def google_connect(self, text: str) -> Reply:
+        g = self.gcal
+        if not g.configured:
+            return Reply(
+                "🔗 *Kalendarz Google — konfiguracja (jednorazowo):*\n"
+                "1. https://console.cloud.google.com → nowy projekt → włącz *Google Calendar API*.\n"
+                "2. *OAuth consent screen*: External, dodaj siebie, potem *Publish app* (w trybie Testing dostęp wygasa po 7 dniach).\n"
+                "3. *Credentials → OAuth client ID*, typ *Desktop app*.\n"
+                "4. Do `.env` na serwerze dopisz `GOOGLE_CLIENT_ID` i `GOOGLE_CLIENT_SECRET`, potem `docker compose up -d`.\n"
+                "5. Wróć tutaj i napisz /google."
+            )
+        if text.strip():
+            try:
+                await g.exchange(text)
+            except GoogleError as e:
+                return Reply(f"⚠️ {e}")
+            dated = [t for t in self.store.open_tasks() if t.due_date]
+            for t in dated:  # zadania sprzed połączenia też trafiają do kalendarza
+                self.calendar_sync(t.id)
+            moved = f" Wysyłam do niego zadania z terminem: {len(dated)}." if dated else ""
+            return Reply(f"✅ Kalendarz Google połączony. Zadania z terminem będą w kalendarzu „Zadania”.{moved}\n"
+                         "Twoje spotkania zobaczysz w /zadania i /kalendarz.")
+        status = "Połączony. Żeby połączyć ponownie:\n" if g.connected else ""
+        return Reply(
+            f"🔗 {status}1. Kliknij przycisk poniżej, wybierz konto i zezwól na dostęp do kalendarza.\n"
+            "2. Google może ostrzec, że aplikacja nie jest zweryfikowana — to Twoja aplikacja: *Zaawansowane → Przejdź*.\n"
+            "3. Przeglądarka przejdzie na adres `http://localhost/?code=...` — strona się nie otworzy, to normalne.\n"
+            "4. Skopiuj *cały adres* z paska i wyślij: `/google <adres>`",
+            [("🔗 Połącz z Google", g.auth_url())],
+        )
 
     async def books_list(self) -> Reply:
         return self.lists.books_view()
@@ -1042,6 +1171,8 @@ class Core:
         await self.fx.close()
         await self.investments.close()
         await self.strava.close()
+        await self.calendar_idle()
+        await self.gcal.close()
 
 
 def _ms(started: float) -> int:
