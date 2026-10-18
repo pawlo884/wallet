@@ -54,6 +54,9 @@ class FakeParser:
             rec(amount=20, type="expense", category_id="nope", account_id="bad", date="2999-01-01", note="x"),
         ])
 
+    async def parse_books(self, images, text):
+        return []
+
 
 class FakeFX:
     async def convert(self, amount, src, dst, on):
@@ -929,6 +932,17 @@ async def lists_test():
     assert (await core.handle_callback(owner, r.buttons[2][1])).text == "↩️ Cofnięte."
     assert core.store.book(book.id).status == "to_buy"
 
+    # zdjęcie, na którym główny parser nic nie znalazł → druga próba pytająca tylko o książki
+    async def books_only(images, text):
+        assert len(images) == 2 and text == ""
+        return [BookAction(action="add", book_id=None, title="Passionate Marriage", author="David Schnarch",
+                           status="to_buy")]
+    core.parser.parse_books = books_only
+    core.parser.next = ParseResult(records=[], amends=False, question="Co to jest?")
+    r = await core.handle_message(owner, "", [(b"png", "image/png"), (b"png2", "image/png")])
+    assert "Dodana: *Passionate Marriage — David Schnarch*" in r.text and "Co to jest" not in r.text, r.text
+    core.store.delete_book(core.store.book_by_key("passionate marriage").id)
+
     # /zadania i przyciski: menu, przesunięcie, zrobione
     v = await core.tasks_list()
     print(v.text)
@@ -964,7 +978,7 @@ async def lists_test():
     log_text = (await core.event_log()).text
     print(log_text)
     kinds = [e["kind"] for e in core.store.recent_events(100)]
-    assert kinds.count("message") == 4 and kinds.count("llm") == 4 and "button" in kinds
+    assert kinds.count("message") == 5 and kinds.count("llm") == 5 and "button" in kinds
     msg = next(e for e in core.store.recent_events(100) if e["kind"] == "message")
     llm = next(e for e in core.store.recent_events(100) if e["kind"] == "llm" and e["trace"] == msg["trace"])
     assert msg["agent"] == "zadania" and llm["agent"] == "zadania" and llm["tokens_in"] == 3200

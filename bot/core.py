@@ -269,6 +269,14 @@ class Core:
             text, images, self.today(), self._catalog_prompt, self._history_messages(owner),
             memory=self.memory.prompt_block(), lists=self.lists.prompt_block(),
         )
+        if images and not (result.records or result.tasks or result.books):
+            # Na zdjęciu nic nie znalazł — najczęściej to książka, którą przeoczył przy szukaniu paragonu.
+            try:
+                result.books = await self.parser.parse_books(images, text)
+            except Exception as e:
+                log.warning("Druga próba (książki): %r", e)
+            if result.books:
+                result.question = None
         agents = (["wydatki"] if result.records else []) + (["zadania"] if result.tasks else []) + (
             ["ksiazki"] if result.books else [])
         events.agent_var.set("+".join(agents) or "wydatki")
