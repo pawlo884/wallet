@@ -1,6 +1,6 @@
 """Lotto i Eurojackpot: ile poszło na kupony, ile wróciło w wygranych, zwrot i szanse.
 
-Wpisy to zwykłe rekordy w kategorii „Lottery, gambling” (i jej podkategoriach): wydatek = kupon /
+Liczone tylko konta aktywne (bez wyłączonych ze statystyk, np. archiwum). Wpisy to zwykłe rekordy w kategorii „Lottery, gambling” (i jej podkategoriach): wydatek = kupon /
 wpłata na lotto.pl, przychód = wygrana. Grę rozpoznajemy po notatce lub odbiorcy („eurojackpot”, „lotto”).
 Szanse liczone dokładnie z zasad gry (kombinatoryka), nie z danych.
 """
@@ -49,8 +49,14 @@ def game_of(rec: dict) -> str:
 async def analyze(core: "Core") -> dict:
     await core.refresh_catalog()
     cats = [LOTTERY] + [c["id"] for c in core._categories.values() if c.get("parentId") == LOTTERY]
+    # Tylko aktywne konta (jak /miesiac) — archiwum ze starą historią nie wchodzi do bilansu.
+    counted = [a for a, acc in core._accounts.items() if not acc.get("excludeFromStats")][:10]
+    if not counted:
+        return {"games": {}, "spent": 0.0, "won": 0.0, "best": None, "first": None, "months": None, "count": 0}
     today = core.today()
-    records = await core.wallet.records("2000-01-01", (today + timedelta(days=1)).isoformat(), categoryId=",".join(cats))
+    records = await core.wallet.records(
+        "2000-01-01", (today + timedelta(days=1)).isoformat(), categoryId=",".join(cats), accountId=",".join(counted)
+    )
     games: dict[str, dict] = defaultdict(lambda: {"spent": 0.0, "won": 0.0, "tickets": 0, "wins": 0})
     best, first = None, None
     for r in records:

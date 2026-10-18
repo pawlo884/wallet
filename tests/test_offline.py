@@ -846,7 +846,7 @@ async def lotto_test():
 
     class LottoWallet(FakeWallet):
         async def records(self, date_from, date_to, **k):
-            assert k["categoryId"] == L and date_from == "2000-01-01", k
+            assert k["categoryId"] == L and date_from == "2000-01-01" and k["accountId"] == "pln,eur", k
             return [{"amount": {"value": v}, "note": n, "recordDate": f"{d}T10:00:00Z", "category": {"id": L}}
                     for v, n, d in rows]
 
