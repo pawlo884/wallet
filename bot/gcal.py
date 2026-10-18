@@ -192,6 +192,34 @@ class GoogleCalendar:
         if r.status_code not in (200, 204, 404, 410):
             r.raise_for_status()
 
+    async def task_changes(self) -> list[dict]:
+        """Wydarzenia kalendarza „Zadania” zmienione od ostatniego sprawdzenia (pierwszy raz: wszystkie,
+        razem z usuniętymi): [{id, deleted, title, due, due_time}]."""
+        st = self.state
+        cal = st.get("calendar_id")
+        if not cal:
+            return []
+        since = st.get("pulled_at")
+        now = datetime.now(tz=self.core.cfg.tz).replace(microsecond=0)
+        out: list[dict] = []
+        params = {"showDeleted": "true", "singleEvents": "true", "maxResults": 250}
+        if since:
+            params["updatedMin"] = since
+        while True:
+            r = await self._req("GET", f"/calendars/{cal}/events", params=params)
+            if r.status_code == 410:  # za stare updatedMin — zaczynamy od teraz
+                break
+            r.raise_for_status()
+            d = r.json()
+            out += [_task_change(e, self.core.cfg.tz) for e in d.get("items", [])]
+            if not (token := d.get("nextPageToken")):
+                break
+            params["pageToken"] = token
+        st = self.state
+        st["pulled_at"] = (now - timedelta(minutes=2)).isoformat()  # zapas na różnicę zegarów
+        self._save(st)
+        return out
+
     # ---------- Twoje wydarzenia ----------
 
     async def events(self, start: date, days: int = 1) -> list[dict]:
@@ -241,6 +269,18 @@ def _local(value: str | None, tz) -> str:
     if not value:
         return ""
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%dT%H:%M")
+
+
+def _task_change(e: dict, tz) -> dict:
+    s = e.get("start", {})
+    if "dateTime" in s:
+        local = _local(s["dateTime"], tz)
+        due, due_time = local[:10], local[11:16]
+    else:
+        due, due_time = s.get("date"), None
+    title = (e.get("summary") or "").removeprefix("✅ ").strip()
+    return {"id": e["id"], "deleted": e.get("status") == "cancelled", "title": title, "due": due,
+            "due_time": due_time}
 
 
 def conflicts(events: list[dict], day: date, hhmm: str, minutes: int = TASK_MINUTES) -> list[dict]:

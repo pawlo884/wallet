@@ -156,6 +156,9 @@ class Store:
         ).fetchall()
         return [Task(**dict(r)) for r in rows]
 
+    def all_tasks(self) -> list[Task]:
+        return [Task(**dict(r)) for r in self.db.execute("SELECT * FROM tasks")]
+
     def done_tasks_since(self, since: float) -> list[Task]:
         rows = self.db.execute(
             "SELECT * FROM tasks WHERE status = 'done' AND done_at >= ? ORDER BY done_at", (since,)

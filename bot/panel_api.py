@@ -104,6 +104,7 @@ def routes(core: "Core") -> list[web.RouteDef]:
     # ---------- zadania ----------
 
     async def tasks_list(_: web.Request) -> web.Response:
+        await core.calendar_pull()
         week_ago = day_start(core.cfg.tz, 7)
         return _json({
             "open": [task_json(t) for t in store.open_tasks()],

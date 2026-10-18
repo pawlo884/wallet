@@ -998,6 +998,7 @@ class Core:
         )
 
     async def tasks_list(self) -> Reply:
+        await self.calendar_pull()
         today = self.today().isoformat()
         evs = await self.calendar_events(self.today(), 1)
         return self.lists.tasks_view([e for e in evs if e["start"][:10] <= today])  # wielodniowe też, gdy trwają
@@ -1047,6 +1048,39 @@ class Core:
                 log.warning("Kalendarz Google: usuwanie %s: %r", event_id, e)
                 self.store.log_event("error", agent="kalendarz", name="gcal_delete", output=str(e)[:300])
 
+    async def calendar_pull(self) -> list[str]:
+        """Zmiany zrobione w samym Kalendarzu Google wracają do listy: usunięte wydarzenie = usunięte
+        zadanie, przeniesione = nowy termin, inna nazwa = nowy tytuł. Zwraca opis zmian."""
+        if not self.gcal.connected:
+            return []
+        lines = []
+        async with self._gcal_lock:
+            try:
+                changes = await asyncio.wait_for(self.gcal.task_changes(), 10)
+            except Exception as e:
+                log.warning("Kalendarz Google: zmiany z kalendarza: %r", e)
+                return []
+            by_event = {t.gcal_id: t for t in self.store.all_tasks() if t.gcal_id}
+            for c in changes:
+                t = by_event.get(c["id"])
+                if not t:
+                    continue
+                if c["deleted"]:
+                    self.store.delete_task(t.id)
+                    lines.append(f"🗑 Usunięte w kalendarzu: {t.title}")
+                    continue
+                fields = {}
+                if c["title"] and c["title"] != t.title:
+                    fields["title"] = c["title"][:200]
+                if c["due"] and (c["due"], c["due_time"]) != (t.due, t.due_time):
+                    fields.update(due=c["due"], due_time=c["due_time"])
+                if fields:
+                    self.store.set_task(t.id, **fields)
+                    lines.append(f"📅 Zmienione w kalendarzu: {fields.get('title', t.title)}")
+        if lines:
+            self.store.log_event("calendar", agent="kalendarz", name="gcal_pull", output="\n".join(lines))
+        return lines
+
     async def calendar_events(self, start: date, days: int) -> list[dict]:
         """Twoje wydarzenia z Kalendarza Google; pusto, gdy niepołączony albo Google nie odpowiada."""
         if not self.gcal.connected:
@@ -1072,6 +1106,7 @@ class Core:
         """/kalendarz: dziś i jutro z Kalendarza Google oraz zadania z terminem."""
         if not self.gcal.connected:
             return await self.google_connect("")
+        await self.calendar_pull()
         today = self.today()
         try:
             evs = await self.gcal.events(today, 2)

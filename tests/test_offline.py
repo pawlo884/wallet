@@ -1045,6 +1045,7 @@ async def gcal_test():
     class FakeGoogle:
         def __init__(self):
             self.cals: dict[str, dict[str, dict]] = {}  # kalendarz „Zadania” → wydarzenia
+            self.cancelled: dict[str, dict] = {}  # usunięte (Google pokazuje je przy showDeleted)
             self.grants: list[str] = []
             self.n = 0
 
@@ -1083,6 +1084,11 @@ async def gcal_test():
             if cal not in self.cals:
                 return httpx.Response(404)
             events = self.cals[cal]
+            if m == "GET" and not eid:
+                assert req.url.params["showDeleted"] == "true"
+                items = [{"id": k, **v} for k, v in events.items()]
+                items += [{"id": k, "status": "cancelled"} for k in self.cancelled]
+                return httpx.Response(200, json={"items": items})
             if m == "POST":
                 self.n += 1
                 events[f"e{self.n}"] = body
@@ -1093,7 +1099,7 @@ async def gcal_test():
                 events[eid] = body
                 return httpx.Response(200, json={"id": eid})
             if m == "DELETE":
-                del events[eid]
+                self.cancelled[eid] = events.pop(eid)
                 return httpx.Response(204)
             raise AssertionError((m, p))
 
@@ -1182,18 +1188,34 @@ async def gcal_test():
     await core.calendar_idle()
     assert len(fake.cals) == 1 and core.store.task(t.id).gcal_id in fake.all()
 
+    # zmiany zrobione w samym Google wracają do listy: przeniesione, przemianowane, usunięte
+    dino = core.store.add_task("Zakupy w Dino", "2026-10-19")
+    core.calendar_sync(dino.id)
+    await core.calendar_idle()
+    dino, t = core.store.task(dino.id), core.store.task(t.id)
+    cal = next(iter(fake.cals))
+    fake.cals[cal][t.gcal_id].update(summary="Dentysta — kontrola", start={"dateTime": "2026-10-22T09:00:00Z"})
+    fake.cancelled[dino.gcal_id] = fake.cals[cal].pop(dino.gcal_id)
+    pulled = await core.calendar_pull()
+    print(pulled)
+    assert pulled == ["📅 Zmienione w kalendarzu: Dentysta — kontrola", "🗑 Usunięte w kalendarzu: Zakupy w Dino"]
+    t = core.store.task(t.id)
+    assert (t.title, t.due, t.due_time) == ("Dentysta — kontrola", "2026-10-22", "11:00") and core.store.task(dino.id) is None
+    assert await core.calendar_pull() == [], "drugi raz nic nowego (te same dane)"
+    assert g.state["pulled_at"]
+
     # panel: wydarzenia na 7 dni, godzina przy dodawaniu i zmianie
     async with TestClient(TestServer(web.build_app(core))) as c:
         d = await (await c.get("/api/v1/tasks")).json()
         assert d["google"] is True and [e["title"] for e in d["calendar"]] == ["Urodziny Ani", "Spotkanie z szefem"]
-        assert next(x for x in d["open"] if x["id"] == t.id)["due_label"] == "wt 20.10 o 09:30"
+        assert next(x for x in d["open"] if x["id"] == t.id)["due_label"] == "czw 22.10 o 11:00"
         assert (await c.post("/api/v1/tasks", json={"title": "x", "due": "2026-10-20", "due_time": "25:00"})).status == 400
         r = await c.post("/api/v1/tasks", json={"title": "Fryzjer", "due": "2026-10-21", "due_time": "17:00"})
         fid = (await r.json())["id"]
         await c.patch(f"/api/v1/tasks/{t.id}", json={"due_time": "10:00"})
         await core.calendar_idle()
         assert core.store.task(t.id).moves == 0, "inna godzina tego dnia to nie przesunięcie"
-        assert fake.all()[core.store.task(t.id).gcal_id]["start"]["dateTime"] == "2026-10-20T10:00:00"
+        assert fake.all()[core.store.task(t.id).gcal_id]["start"]["dateTime"] == "2026-10-22T10:00:00"
         assert fake.all()[core.store.task(fid).gcal_id]["start"]["dateTime"] == "2026-10-21T17:00:00"
         await c.delete(f"/api/v1/tasks/{fid}")
         await core.calendar_idle()
