@@ -36,6 +36,7 @@ domeny ani HTTPS** na VPS.
 | `/inwestycja <opis>` | nowa inwestycja, np. `/inwestycja srebro 2 uncje kupione 2024 za 600 zł` |
 | `/inwestycje` | wycena na żywo w PLN (metale: gold-api.com, ETF/akcje: Yahoo, kurs NBP), zysk/strata |
 | `/multisport` | czy karta Multisport się opłaca: wejścia ze Stravy, koszt wejścia, próg opłacalności |
+| `/lotto` | Lotto i Eurojackpot: ile wydane, ile wygrane, zwrot, szanse na wygraną |
 | `/strava` | jednorazowe połączenie konta Strava (OAuth) |
 | `/pamiec` | zapamiętani sprzedawcy (kategoria, konto) i zapominanie |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
@@ -212,6 +213,7 @@ bot/
   statement.py     wyciągi z banku: uzgadnianie z Wallet, skrzynka IMAP
   investments.py   metale i ETF/akcje z wyceną na żywo
   multisport.py    opłacalność karty Multisport
+  lotto.py         Lotto i Eurojackpot: bilans gier, zwrot, szanse (kategoria Lottery, gambling)
   strava.py        połączenie ze Stravą (OAuth, aktywności)
   fx.py            kursy NBP
   stt.py           mowa → tekst (faster-whisper, lokalnie)
