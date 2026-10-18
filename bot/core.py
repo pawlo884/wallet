@@ -952,7 +952,7 @@ Nowa: `/plan netflix 49 co miesiąc 15-go` · lista i usuwanie: `/plany`
 Kursy walut: `/kurs` · `/kurs 100 eur` · `/kurs 50 usd eur`
 Inwestycje: `/inwestycja srebro 2 uncje` · wycena: `/inwestycje`
 Multisport: opłacalność ze Stravy — `/multisport`
-Lotto i Eurojackpot: wydane, wygrane, zwrot i szanse — `/lotto`
+Eurojackpot: wydane, wygrane, zwrot i szanse — `/lotto`
 Długi: `/dlug A6 9100` · spłata: „spłata A6 500” · stan: `/dlugi`
 Wyciąg z banku: wklej treść maila albo wyślij plik .eml — porównam z Wallet i pokażę, czego brakuje.
 🎤 Możesz też nagrać głosówkę.
