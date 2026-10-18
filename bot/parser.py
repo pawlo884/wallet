@@ -72,7 +72,8 @@ class ParseResult(BaseModel):
         "(szkic lub zapisany rekord) — wtedy records to PEŁNA poprawiona wersja tamtej transakcji"
     )
     question: str | None = Field(
-        description="Jeśli nie da się ustalić transakcji (np. brak kwoty) — krótkie pytanie po polsku. Inaczej null."
+        description="Jeśli nie da się ustalić transakcji (np. brak kwoty) — krótkie pytanie po polsku. "
+        "Gdy użytkownik o coś pyta — tu krótka odpowiedź. Inaczej null."
     )
 
 
@@ -179,6 +180,9 @@ Zasady:
   note np. "kupon Eurojackpot", "wygrana Eurojackpot" — bot liczy z nich bilans (/lotto).
 - Gdy wiadomość nie opisuje transakcji, zadania ani książki albo brak kwoty: records = [] i zadaj pytanie
   w question.
+- Gdy użytkownik o coś PYTA ("skąd się wzięło…", "co dodałeś?", "ile mam zadań?", "dlaczego…") —
+  odpowiedz krótko po polsku w question na podstawie rozmowy i list poniżej; records, tasks i books puste.
+  Jeśli coś dodałeś przez pomyłkę, przyznaj to i powiedz, że można to cofnąć przyciskiem ↩️ albo usunąć w /ksiazki.
 
 Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (obie poniżej, w osobnym bloku).
 - Zadanie ("jutro zadzwonić do ubezpieczyciela", "do soboty wymienić opony", "zadanie: oddać książkę",
@@ -193,6 +197,11 @@ Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (
   też się liczy): "mam", "kupiona", "kupiłem", "do przeczytania" → to_read; "czytam", "zacząłem" → reading;
   "przeczytałem", "skończyłem" → read. To, co widać na obrazku (półka, biblioteka w Legimi/Kindle/Empik,
   przycisk „Czytaj”, pasek postępu), NIE zmienia statusu — screen bez podpisu to zawsze to_buy.
+- Kilka zdjęć naraz to jedna wiadomość: każdą książkę dodaj raz.
+- Ze zdjęcia bierz TYLKO książki, które są głównym tematem: okładka z przodu, trzymana w ręce, wskazywana
+  palcem albo na środku kadru, z czytelnym tytułem. Pomijaj książki w tle, w stosach, na półkach i same
+  grzbiety, chyba że cały screen to lista/półka. Nie zgaduj ani nie dopowiadaj tytułów: tylko to, co da się
+  przeczytać; tytuł nieczytelny → pomiń. Napisy z interfejsu (TikTok, Instagram, przyciski) to nie książki.
 - Zrzut ekranu lub zdjęcie z książkami (okładka, strona sklepu, lista, półka), które nie jest
   potwierdzeniem zakupu → tylko books (każda widoczna książka osobno, z autorem, jeśli widać), records=[].
   Potwierdzenie zakupu / paragon z książkami → records (wydatek) ORAZ books ze statusem to_read.
