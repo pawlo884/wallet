@@ -1,7 +1,9 @@
 """Zamiana wiadomości (tekst i/lub zdjęcie paragonu) na rekordy Wallet przy pomocy Claude."""
 
 import base64
+import time
 from datetime import date
+from typing import Callable
 from typing import Literal
 
 from anthropic import AsyncAnthropic
@@ -32,8 +34,35 @@ class ParsedRecord(BaseModel):
     )
 
 
+class TaskAction(BaseModel):
+    action: Literal["add", "done", "postpone"] = Field(
+        description="add = nowe zadanie; done = zadanie z listy ZADANIA zrobione; postpone = przesunięcie terminu"
+    )
+    task_id: int | None = Field(description="ID zadania z listy ZADANIA (dla done/postpone); dla add null")
+    title: str = Field(description="Krótko, w bezokoliczniku, po polsku, np. 'Zadzwonić do ubezpieczyciela'")
+    due: str | None = Field(description="Termin YYYY-MM-DD, jeśli wynika z wiadomości (dla postpone: nowy termin); inaczej null")
+
+
+class BookAction(BaseModel):
+    action: Literal["add", "status"] = Field(
+        description="add = nowa książka na liście; status = zmiana statusu książki z listy KSIĄŻKI"
+    )
+    book_id: int | None = Field(description="ID książki z listy KSIĄŻKI (dla status); dla add null")
+    title: str = Field(description="Tytuł książki (bez autora)")
+    author: str | None = Field(description="Autor, jeśli znany z wiadomości lub zdjęcia; inaczej null")
+    status: Literal["to_buy", "to_read", "reading", "read"] = Field(
+        description="to_buy = do kupienia, to_read = mam / kupiona, czeka na czytanie, reading = czytam, read = przeczytana"
+    )
+
+
 class ParseResult(BaseModel):
     records: list[ParsedRecord]
+    tasks: list[TaskAction] = Field(
+        default_factory=list, description="Zadania do dodania / odhaczenia / przesunięcia (zwykle pusta lista)"
+    )
+    books: list[BookAction] = Field(
+        default_factory=list, description="Książki do dodania / zmiany statusu (zwykle pusta lista)"
+    )
     amends: bool = Field(
         description="true, gdy wiadomość poprawia/uzupełnia transakcję pokazaną wcześniej w rozmowie "
         "(szkic lub zapisany rekord) — wtedy records to PEŁNA poprawiona wersja tamtej transakcji"
@@ -144,7 +173,25 @@ Zasady:
 - Gry losowe: użytkownik gra TYLKO w Eurojackpot ("lotto", "wpłata na lotto.pl", "kupon" = Eurojackpot).
   Kupon/wpłata = expense, wygrana = income, obie w kategorii loterii/hazardu ("Lottery, gambling"),
   note np. "kupon Eurojackpot", "wygrana Eurojackpot" — bot liczy z nich bilans (/lotto).
-- Gdy wiadomość nie opisuje transakcji albo brak kwoty: records = [] i zadaj pytanie w question.
+- Gdy wiadomość nie opisuje transakcji, zadania ani książki albo brak kwoty: records = [] i zadaj pytanie
+  w question.
+
+Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (obie poniżej, w osobnym bloku).
+- Zadanie ("jutro zadzwonić do ubezpieczyciela", "do soboty wymienić opony", "zadanie: oddać książkę",
+  "muszę kupić prezent dla mamy") → tasks action=add, records=[]. "Muszę kupić X" bez kwoty to zadanie,
+  nie wydatek. due tylko gdy termin wynika z wiadomości ("jutro", "w piątek", "do 20-go").
+- "zrobione: …", "zadzwoniłem do ubezpieczyciela", "odhacz …" dla zadania z listy → action=done z task_id.
+  "przesuń … na poniedziałek" → action=postpone z task_id i nowym due.
+- Książka ("chcę przeczytać Atomowe nawyki", "książka: Sapiens", "do kupienia: Diuna") → books action=add.
+  Status: "chcę kupić", "do kupienia", strona produktu w sklepie, koszyk, lista życzeń → to_buy;
+  "mam", "kupiona", "na półce", biblioteka/półka w aplikacji (Legimi, Empik Go, Kindle, Storytel) → to_read;
+  "czytam", "zacząłem" → reading; "przeczytałem", "skończyłem" → read. Bez wskazówek → to_buy.
+- Zrzut ekranu lub zdjęcie z książkami (okładka, strona sklepu, lista, półka) BEZ ceny zapłaconej
+  przez użytkownika → tylko books (każda widoczna książka osobno, z autorem, jeśli widać), records=[].
+  Potwierdzenie zakupu / paragon z książkami → records (wydatek) ORAZ books ze statusem to_read.
+- Książka, która już jest na liście KSIĄŻKI → action=status z book_id (np. kupiona → to_read), nie add.
+  Zakup książki z listy ("kupiłem Atomowe nawyki 45 zł") → wydatek w records + books status to_read.
+- Zadania i książki to nie transakcje: nie twórz dla nich rekordów i nie pytaj o kwotę.
 
 Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:
 - Odpowiedź na Twoje pytanie albo dopowiedzenie ("to wydatek", "15$", "wczoraj") łącz z wcześniejszą
@@ -179,6 +226,15 @@ class RecordParser:
     def __init__(self, model: str):
         self._client = AsyncAnthropic()
         self._model = model
+        # (nazwa wywołania, model, usage, ms) → dziennik zdarzeń; ustawia Core
+        self.on_usage: Callable[[str, str, object, int], None] | None = None
+
+    async def _call(self, name: str, **kw):
+        started = time.monotonic()
+        response = await self._client.messages.parse(model=self._model, **kw)
+        if self.on_usage:
+            self.on_usage(name, self._model, response.usage, int((time.monotonic() - started) * 1000))
+        return response
 
     async def parse(
         self,
@@ -188,6 +244,7 @@ class RecordParser:
         catalog_prompt: str,
         history: list[dict] | None = None,
         memory: str = "",
+        lists: str = "",
     ) -> ParseResult:
         """history: wcześniejsze tury [{"role": "user"|"assistant", "content": str}], od najstarszej."""
         content: list[dict] = [
@@ -208,10 +265,10 @@ class RecordParser:
                 f"Wiadomość: {text or '(tylko zdjęcie)'}",
             }
         )
-        response = await self._client.messages.parse(
-            model=self._model,
+        response = await self._call(
+            "parse",
             max_tokens=4000,
-            system=_system(catalog_prompt, memory),
+            system=_system(catalog_prompt, memory, lists),
             messages=[*(history or []), {"role": "user", "content": content}],
             output_format=ParseResult,
         )
@@ -222,8 +279,8 @@ class RecordParser:
         return response.parsed_output
 
     async def parse_statement(self, text: str, today: date, catalog_prompt: str, memory: str = "") -> ParseResult:
-        response = await self._client.messages.parse(
-            model=self._model,
+        response = await self._call(
+            "parse_statement",
             max_tokens=16000,  # wyciąg może mieć kilkadziesiąt operacji
             system=_system(catalog_prompt, memory),
             messages=[
@@ -240,8 +297,8 @@ class RecordParser:
         return response.parsed_output
 
     async def parse_investment(self, text: str, today: date) -> InvestmentResult:
-        response = await self._client.messages.parse(
-            model=self._model,
+        response = await self._call(
+            "parse_investment",
             max_tokens=1000,
             messages=[{"role": "user", "content": f"{INVESTMENT_INSTRUCTIONS}\nDzisiaj jest {today.isoformat()}.\n\nWiadomość: {text}"}],
             output_format=InvestmentResult,
@@ -251,8 +308,8 @@ class RecordParser:
         return response.parsed_output
 
     async def parse_plan(self, text: str, today: date, catalog_prompt: str) -> PlanResult:
-        response = await self._client.messages.parse(
-            model=self._model,
+        response = await self._call(
+            "parse_plan",
             max_tokens=2000,
             # Ten sam prefiks co przy rekordach (cache), instrukcje planu w wiadomości.
             system=[{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}],
@@ -270,12 +327,15 @@ class RecordParser:
         return response.parsed_output
 
 
-def _system(catalog_prompt: str, memory: str) -> list[dict]:
+def _system(catalog_prompt: str, memory: str, lists: str = "") -> list[dict]:
     # Katalog kont/kategorii zmienia się rzadko — stabilny prefiks do cache. Pamięć sprzedawców
     # zmienia się po każdym zapisie, więc osobny blok za nim (katalog zostaje w cache).
+    # Zadania i książki zmieniają się najczęściej — na końcu, bez cache.
     blocks = [{"type": "text", "text": catalog_prompt, "cache_control": {"type": "ephemeral"}}]
     if memory:
         blocks.append({"type": "text", "text": memory, "cache_control": {"type": "ephemeral"}})
+    if lists:
+        blocks.append({"type": "text", "text": lists})
     return blocks
 
 

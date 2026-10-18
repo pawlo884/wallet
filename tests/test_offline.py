@@ -46,7 +46,7 @@ class FakeParser:
     def __init__(self):
         self.histories = []
 
-    async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+    async def parse(self, text, images, today, catalog_prompt, history=None, memory="", **kw):
         assert "Ogólne" in catalog_prompt and "Groceries" in catalog_prompt
         self.histories.append(history or [])
         return ParseResult(question=None, amends=False, records=[
@@ -243,7 +243,7 @@ async def memory_and_fx():
             super().__init__()
             self.script = list(script)
 
-        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory="", **kw):
             self.histories.append(history or [])
             return self.script.pop(0)
 
@@ -395,7 +395,7 @@ async def debts():
             return await super().records(*a, **k)
 
     class DebtParser(FakeParser):
-        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory="", **kw):
             assert "a6 | A6" in catalog_prompt, "prompt zna długi"
             return ParseResult(amends=False, question=None, records=[
                 rec(amount=500, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
@@ -469,7 +469,7 @@ async def forecast_web_transfer():
     ACC.append({"id": "awar", "name": "Awaryjne", "currencyCode": "PLN", "balance": {"currentBalance": 0}})
 
     class TransferParser(FakeParser):
-        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory="", **kw):
             return ParseResult(amends=False, question=None, records=[
                 rec(amount=300, type="expense", category_id="food", account_id="pln", date=today.isoformat(),
                     note="odkładam na awaryjne", transfer_to="awar")])
@@ -772,7 +772,7 @@ async def memory_test():
     class MemParser:
         def __init__(self):
             self.memories, self.out = [], None
-        async def parse(self, text, images, today, catalog_prompt, history=None, memory=""):
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory="", **kw):
             self.memories.append(memory)
             return ParseResult(question=None, amends=False, records=[self.out(today)])
 
@@ -869,3 +869,112 @@ async def lotto_test():
 
 
 asyncio.run(lotto_test())
+
+
+async def lists_test():
+    """Zadania i książki ze zwykłych wiadomości i screenów, przyciski, cofanie, dziennik zdarzeń."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+    from bot.parser import BookAction, TaskAction
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+
+    class ListParser(FakeParser):
+        def __init__(self):
+            super().__init__()
+            self.next, self.lists = None, []
+        async def parse(self, text, images, today, catalog_prompt, history=None, memory="", lists="", **kw):
+            self.lists.append(lists)
+            self.on_usage("parse", "claude-haiku-4-5",
+                          SimpleNamespace(input_tokens=200, cache_read_input_tokens=3000, output_tokens=80), 420)
+            return self.next
+
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), ListParser()
+    core.parser.on_usage = core._log_usage
+    core.today = lambda: dt.date(2026, 10, 18)
+    owner = "tg:1"
+
+    # zadanie z terminem + książka do kupienia w jednej wiadomości, bez transakcji
+    core.parser.next = ParseResult(records=[], amends=False, question=None, tasks=[
+        TaskAction(action="add", task_id=None, title="Zadzwonić do ubezpieczyciela", due="2026-10-19"),
+    ], books=[BookAction(action="add", book_id=None, title="Atomowe nawyki", author="James Clear", status="to_buy")])
+    r = await core.handle_message(owner, "jutro zadzwonić do ubezpieczyciela i chcę kupić Atomowe nawyki", [])
+    print(r.text, r.buttons)
+    assert "Nowe zadanie: *Zadzwonić do ubezpieczyciela* (jutro)" in r.text and "Do kupienia" in r.text
+    assert r.buttons[0][1].startswith("iu:") and core.wallet.created == []
+    task = core.store.open_tasks()[0]
+    book = core.store.books()[0]
+
+    # ta sama książka ze screena drugi raz nie dubluje; blok dla modelu zna zadania i książki
+    core.parser.next = ParseResult(records=[], amends=False, question=None, books=[
+        BookAction(action="add", book_id=None, title="atomowe  NAWYKI", author=None, status="to_buy")])
+    r = await core.handle_message(owner, "", [(b"png", "image/png")])
+    assert "Już jest na liście" in r.text and len(core.store.books()) == 1
+    assert f"{task.id} | Zadzwonić do ubezpieczyciela | 2026-10-19" in core.parser.lists[-1]
+    assert f"{book.id} | Atomowe nawyki | James Clear | to_buy" in core.parser.lists[-1]
+
+    # zakup książki z listy: wydatek jako szkic + status „do przeczytania”, oba z cofaniem
+    core.parser.next = ParseResult(amends=False, question=None, records=[
+        rec(amount=45, type="expense", category_id="food", account_id="pln", date="2026-10-18", counterparty="Empik",
+            note="Atomowe nawyki")],
+        books=[BookAction(action="status", book_id=book.id, title="Atomowe nawyki", author=None, status="to_read")])
+    r = await core.handle_message(owner, "kupiłem atomowe nawyki 45 zł w empiku", [])
+    print(r.text, r.buttons)
+    assert "→ 📚 Do przeczytania" in r.text and "📝 *Do zapisania:*" in r.text
+    assert [b[0] for b in r.buttons] == ["✅ Zapisz", "❌ Anuluj", "↩️ Cofnij listę"]
+    assert core.store.book(book.id).status == "to_read"
+    assert (await core.handle_callback(owner, r.buttons[2][1])).text == "↩️ Cofnięte."
+    assert core.store.book(book.id).status == "to_buy"
+
+    # /zadania i przyciski: menu, przesunięcie, zrobione
+    v = await core.tasks_list()
+    print(v.text)
+    assert "*📌 Dziś*" not in v.text and "*🗓 Najbliższe*" in v.text and v.buttons == [("Zadzwonić do ubezpieczyciela", f"tk:{task.id}")]
+    menu = await core.handle_callback(owner, f"tk:{task.id}")
+    assert [b[1] for b in menu.buttons] == [f"td:{task.id}", f"tp:{task.id}", f"tn:{task.id}", f"tx:{task.id}"]
+    for _ in range(3):
+        moved = await core.handle_callback(owner, f"tp:{task.id}")
+    assert "trzecie przesunięcie" in moved.text and core.store.task(task.id).moves == 3
+    assert "Zostało: 0" in (await core.handle_callback(owner, f"td:{task.id}")).text
+    assert "Tego zadania już nie ma" in (await core.handle_callback(owner, f"td:{task.id}")).text
+    assert "pusta" in (await core.tasks_list()).text
+
+    # odhaczenie zwykłym zdaniem i cofnięcie przywraca zadanie
+    t2 = core.store.add_task("Oddać książkę do biblioteki", None)
+    core.parser.next = ParseResult(records=[], amends=False, question=None, tasks=[
+        TaskAction(action="done", task_id=t2.id, title="Oddać książkę do biblioteki", due=None)])
+    r = await core.handle_message(owner, "oddałem książkę", [])
+    assert "Zrobione" in r.text and core.store.task(t2.id).status == "done"
+    await core.handle_callback(owner, r.buttons[0][1])
+    assert core.store.task(t2.id).status == "open"
+
+    # /ksiazki i zmiana statusu przyciskiem
+    v = await core.books_list()
+    print(v.text, v.buttons)
+    assert v.buttons == [("🛒 Atomowe nawyki", f"bk:{book.id}")]
+    menu = await core.handle_callback(owner, f"bk:{book.id}")
+    assert menu.buttons[0] == ("📚 Do przeczytania", f"bs:{book.id}.to_read"), menu.buttons
+    assert "Gratulacje" in (await core.handle_callback(owner, f"bs:{book.id}.read")).text
+    assert "Przeczytane (1)*: Atomowe nawyki" in (await core.books_list()).text
+
+    # dziennik: wiadomości, przyciski i wywołania modelu z kosztem; /log
+    log_text = (await core.event_log()).text
+    print(log_text)
+    kinds = [e["kind"] for e in core.store.recent_events(100)]
+    assert kinds.count("message") == 4 and kinds.count("llm") == 4 and "button" in kinds
+    msg = next(e for e in core.store.recent_events(100) if e["kind"] == "message")
+    llm = next(e for e in core.store.recent_events(100) if e["kind"] == "llm" and e["trace"] == msg["trace"])
+    assert msg["agent"] == "zadania" and llm["agent"] == "zadania" and llm["tokens_in"] == 3200
+    assert abs(llm["cost_usd"] - (200 * 1 + 3000 * 0.1 + 80 * 5) / 1e6) < 1e-12
+    assert "w tym miesiącu *$0.004*" in log_text and "🧠" in log_text
+
+    # limit kosztu: jedno ostrzeżenie w miesiącu
+    object.__setattr__(core.cfg, "llm_budget_usd", 0.001)
+    assert core.budget_alert() is not None and core.budget_alert() is None
+    print("\nOK listy")
+
+
+asyncio.run(lists_test())
