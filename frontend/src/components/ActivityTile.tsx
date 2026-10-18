@@ -18,6 +18,7 @@ const AGENT_COLOR: Record<string, string> = {
   wydatki: "bg-emerald-900/60 text-emerald-300",
   zadania: "bg-sky-900/60 text-sky-300",
   ksiazki: "bg-violet-900/60 text-violet-300",
+  kalendarz: "bg-teal-900/60 text-teal-300",
   panel: "bg-slate-800 text-slate-300",
 };
 

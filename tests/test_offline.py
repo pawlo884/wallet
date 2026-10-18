@@ -1023,3 +1023,184 @@ async def panel_test():
 
 
 asyncio.run(panel_test())
+
+
+async def gcal_test():
+    """Kalendarz Google: /google, zadania jako wydarzenia (cały dzień / godzina), kolizje, odczyt, panel."""
+    import datetime as dt
+    import json
+    import re as _re
+    import tempfile
+    import time as _time
+    from pathlib import Path
+    from urllib.parse import parse_qs
+    import httpx
+    from aiohttp.test_utils import TestClient, TestServer
+    from bot import web
+    from bot.gcal import SCOPE
+    from bot.parser import TaskAction
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+
+    class FakeGoogle:
+        def __init__(self):
+            self.cals: dict[str, dict[str, dict]] = {}  # kalendarz „Zadania” → wydarzenia
+            self.grants: list[str] = []
+            self.n = 0
+
+        def __call__(self, req: httpx.Request) -> httpx.Response:
+            if req.url.host == "oauth2.googleapis.com":
+                form = {k: v[0] for k, v in parse_qs(req.content.decode()).items()}
+                self.grants.append(form["grant_type"])
+                if form["grant_type"] == "authorization_code":
+                    assert form["code"] == "4/0Abc-def_ghi", form
+                    return httpx.Response(200, json={"access_token": "a1", "refresh_token": "r1", "expires_in": 3600,
+                                                     "scope": SCOPE})
+                assert form["refresh_token"] == "r1"
+                return httpx.Response(200, json={"access_token": "a2", "expires_in": 3600})
+            assert req.headers["Authorization"].startswith("Bearer a")
+            p, m = req.url.path.removeprefix("/calendar/v3"), req.method
+            body = json.loads(req.content) if req.content else None
+            if p == "/calendars" and m == "POST":
+                self.n += 1
+                cid = f"c{self.n}@group.calendar.google.com"
+                self.cals[cid] = {}
+                return httpx.Response(200, json={"id": cid, "summary": body["summary"]})
+            if p == "/users/me/calendarList":
+                return httpx.Response(200, json={"items": [
+                    {"id": "primary@gmail.com", "summary": "Paweł", "selected": True},
+                    {"id": "ukryty", "summary": "Ukryty"},
+                    *({"id": c, "summary": "Zadania", "selected": True} for c in self.cals),
+                ]})
+            cal, eid = _re.fullmatch(r"/calendars/([^/]+)/events/?(.*)", p).groups()
+            if cal == "primary@gmail.com":
+                return httpx.Response(200, json={"items": [
+                    {"summary": "Spotkanie z szefem", "start": {"dateTime": "2026-10-19T13:00:00Z"},
+                     "end": {"dateTime": "2026-10-19T14:00:00Z"}},  # 15:00–16:00 w Warszawie
+                    {"summary": "Urodziny Ani", "start": {"date": "2026-10-18"}, "end": {"date": "2026-10-19"}},
+                    {"summary": "Odwołane", "status": "cancelled", "start": {"date": "2026-10-18"}, "end": {}},
+                ]})
+            if cal not in self.cals:
+                return httpx.Response(404)
+            events = self.cals[cal]
+            if m == "POST":
+                self.n += 1
+                events[f"e{self.n}"] = body
+                return httpx.Response(200, json={"id": f"e{self.n}"})
+            if eid not in events:
+                return httpx.Response(410 if m == "DELETE" else 404)
+            if m == "PUT":
+                events[eid] = body
+                return httpx.Response(200, json={"id": eid})
+            if m == "DELETE":
+                del events[eid]
+                return httpx.Response(204)
+            raise AssertionError((m, p))
+
+        def all(self) -> dict[str, dict]:
+            return {k: v for c in self.cals.values() for k, v in c.items()}
+
+    class TaskParser(FakeParser):
+        next = None
+        async def parse(self, *a, **kw):
+            return self.next
+
+    core = Core(Config())
+    core.wallet, core.parser = FakeWallet(), TaskParser()
+    core.today = lambda: dt.date(2026, 10, 18)
+    g = core.gcal
+    assert "console.cloud.google.com" in (await core.google_connect("")).text
+    g.client_id, g.client_secret = "id.apps.googleusercontent.com", "sekret"
+    fake = FakeGoogle()
+    await g._http.aclose()
+    g._http = httpx.AsyncClient(transport=httpx.MockTransport(fake))
+
+    r = await core.google_connect("")
+    url = r.buttons[0][1]
+    assert "access_type=offline" in url and "prompt=consent" in url and "redirect_uri=http%3A%2F%2Flocalhost" in url
+    assert "Nie widzę kodu" in (await core.google_connect("http://localhost/?error=access_denied")).text
+
+    # zadanie sprzed połączenia trafia do kalendarza zaraz po /google; bez terminu — nie
+    old = core.store.add_task("Wymienić opony", "2026-10-25")
+    core.store.add_task("Kiedyś: nauczyć się żonglować", None)
+    r = await core.google_connect("http://localhost/?code=4/0Abc-def_ghi&scope=https://www.googleapis.com/auth/calendar")
+    assert "połączony" in r.text and "zadania z terminem: 1" in r.text, r.text
+    await core.calendar_idle()
+    old = core.store.task(old.id)
+    ev = fake.all()[old.gcal_id]
+    assert ev["start"] == {"date": "2026-10-25"} and ev["end"] == {"date": "2026-10-26"} and ev["summary"] == "Wymienić opony"
+    assert len(fake.cals) == 1 and len(fake.all()) == 1
+
+    # „jutro o 15 zadzwonić do ZUS”: wydarzenie z godziną i ostrzeżenie o spotkaniu o tej porze
+    core.parser.next = ParseResult(records=[], amends=False, question=None, tasks=[
+        TaskAction(action="add", task_id=None, title="Zadzwonić do ZUS", due="2026-10-19", time="15")])
+    r = await core.handle_message("tg:1", "jutro o 15 zadzwonić do ZUS", [])
+    print(r.text)
+    assert "(jutro o 15:00)" in r.text and "⚠️ O 15:00 masz już: Spotkanie z szefem" in r.text
+    await core.calendar_idle()
+    zus = core.store.task(core.store.open_tasks()[0].id)
+    assert zus.title == "Zadzwonić do ZUS" and zus.due_time == "15:00"
+    ev = fake.all()[zus.gcal_id]
+    assert ev["start"] == {"dateTime": "2026-10-19T15:00:00", "timeZone": "Europe/Warsaw"}
+    assert ev["end"]["dateTime"] == "2026-10-19T15:30:00" and ev["transparency"] == "opaque"
+
+    # przesunięcie przyciskiem zachowuje godzinę; zrobione → „✅” w kalendarzu (zostaje jako ślad)
+    await core.handle_callback("tg:1", f"tp:{zus.id}")
+    await core.calendar_idle()
+    assert fake.all()[zus.gcal_id]["start"]["dateTime"] == "2026-10-19T15:00:00"
+    await core.handle_callback("tg:1", f"td:{zus.id}")
+    await core.calendar_idle()
+    assert fake.all()[zus.gcal_id]["summary"] == "✅ Zadzwonić do ZUS"
+
+    # dodane i od razu cofnięte — w kalendarzu nic nie zostaje
+    core.parser.next = ParseResult(records=[], amends=False, question=None, tasks=[
+        TaskAction(action="add", task_id=None, title="Kupić mleko", due="2026-10-18")])
+    r = await core.handle_message("tg:1", "dziś kupić mleko", [])
+    await core.handle_callback("tg:1", r.buttons[0][1])
+    await core.calendar_idle()
+    assert not any(e["summary"] == "Kupić mleko" for e in fake.all().values())
+
+    # /zadania i /kalendarz pokazują Twoje wydarzenia (bez odwołanych, bez kalendarza „Zadania”)
+    v = (await core.tasks_list()).text
+    print(v)
+    assert "📅 W kalendarzu dziś" in v and "📅 cały dzień Urodziny Ani" in v and "Odwołane" not in v
+    assert "Spotkanie z szefem" not in v, "jutrzejsze tylko w /kalendarz"
+    k = (await core.calendar_report()).text
+    print(k)
+    assert "📅 15:00–16:00 Spotkanie z szefem" in k and "🗒 cały dzień Wymienić opony" not in k
+
+    # usunięcie zadania usuwa wydarzenie; wygasły token odświeża się sam
+    st = g.state; st["expires_at"] = _time.time() - 10; g._save(st)
+    await core.handle_callback("tg:1", f"txy:{old.id}")
+    await core.calendar_idle()
+    assert old.gcal_id not in fake.all() and fake.grants[-1] == "refresh_token"
+
+    # kalendarz „Zadania” usunięty ręcznie w Google → bot zakłada nowy
+    fake.cals.clear()
+    t = core.store.add_task("Dentysta", "2026-10-20", "09:30")
+    core.calendar_sync(t.id)
+    await core.calendar_idle()
+    assert len(fake.cals) == 1 and core.store.task(t.id).gcal_id in fake.all()
+
+    # panel: wydarzenia na 7 dni, godzina przy dodawaniu i zmianie
+    async with TestClient(TestServer(web.build_app(core))) as c:
+        d = await (await c.get("/api/v1/tasks")).json()
+        assert d["google"] is True and [e["title"] for e in d["calendar"]] == ["Urodziny Ani", "Spotkanie z szefem"]
+        assert next(x for x in d["open"] if x["id"] == t.id)["due_label"] == "wt 20.10 o 09:30"
+        assert (await c.post("/api/v1/tasks", json={"title": "x", "due": "2026-10-20", "due_time": "25:00"})).status == 400
+        r = await c.post("/api/v1/tasks", json={"title": "Fryzjer", "due": "2026-10-21", "due_time": "17:00"})
+        fid = (await r.json())["id"]
+        await c.patch(f"/api/v1/tasks/{t.id}", json={"due_time": "10:00"})
+        await core.calendar_idle()
+        assert core.store.task(t.id).moves == 0, "inna godzina tego dnia to nie przesunięcie"
+        assert fake.all()[core.store.task(t.id).gcal_id]["start"]["dateTime"] == "2026-10-20T10:00:00"
+        assert fake.all()[core.store.task(fid).gcal_id]["start"]["dateTime"] == "2026-10-21T17:00:00"
+        await c.delete(f"/api/v1/tasks/{fid}")
+        await core.calendar_idle()
+        assert not any(e["summary"] == "Fryzjer" for e in fake.all().values())
+    assert not [e for e in core.store.recent_events(200) if e["kind"] == "error"]
+    await core.close()
+    print("\nOK kalendarz")
+
+
+asyncio.run(gcal_test())

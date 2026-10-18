@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL DEFAULT 'open',  -- open | done
     moves INTEGER NOT NULL DEFAULT 0,      -- ile razy przesunięte (do pilnowania w etapie 2)
     created_at REAL NOT NULL,
-    done_at REAL
+    done_at REAL,
+    due_time TEXT,                 -- HH:MM albo NULL (cały dzień)
+    gcal_id TEXT                   -- ID wydarzenia w Kalendarzu Google (kalendarz „Zadania”)
 );
 CREATE TABLE IF NOT EXISTS books (
     id INTEGER PRIMARY KEY,
@@ -54,6 +56,9 @@ CREATE INDEX IF NOT EXISTS events_at ON events(at);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 """
 
+# kolumny dodane po pierwszym wdrożeniu (CREATE TABLE IF NOT EXISTS nie zmienia istniejącej tabeli)
+MIGRATIONS = {"tasks": {"due_time": "TEXT", "gcal_id": "TEXT"}}
+
 EVENTS_KEEP_DAYS = 180
 
 BOOK_STATUSES = {
@@ -79,6 +84,8 @@ class Task:
     moves: int
     created_at: float
     done_at: float | None
+    due_time: str | None = None
+    gcal_id: str | None = None
 
     @property
     def due_date(self) -> date | None:
@@ -111,6 +118,11 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for col, typ in cols.items():
+                if col not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
         self.db.execute("DELETE FROM events WHERE at < ?", (time.time() - EVENTS_KEEP_DAYS * 86400,))
 
     def close(self) -> None:
@@ -127,9 +139,10 @@ class Store:
 
     # ---------- zadania ----------
 
-    def add_task(self, title: str, due: str | None) -> Task:
+    def add_task(self, title: str, due: str | None, due_time: str | None = None) -> Task:
         cur = self.db.execute(
-            "INSERT INTO tasks (title, due, created_at) VALUES (?, ?, ?)", (title.strip()[:200], due, time.time())
+            "INSERT INTO tasks (title, due, due_time, created_at) VALUES (?, ?, ?, ?)",
+            (title.strip()[:200], due, due_time if due else None, time.time()),
         )
         return self.task(cur.lastrowid)
 
@@ -158,8 +171,12 @@ class Store:
     def finish_task(self, tid: int) -> None:
         self.set_task(tid, status="done", done_at=time.time())
 
-    def postpone_task(self, tid: int, due: str | None) -> None:
-        self.db.execute("UPDATE tasks SET due = ?, moves = moves + 1 WHERE id = ?", (due, tid))
+    def postpone_task(self, tid: int, due: str | None, due_time: str | None = None) -> None:
+        """Nowy termin; godzina przepada, chyba że podana (\"przełóż na piątek o 10\")."""
+        self.db.execute(
+            "UPDATE tasks SET due = ?, due_time = ?, moves = moves + 1 WHERE id = ?",
+            (due, due_time if due else None, tid),
+        )
 
     def delete_task(self, tid: int) -> None:
         self.db.execute("DELETE FROM tasks WHERE id = ?", (tid,))

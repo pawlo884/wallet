@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Book, type Overview, type Task } from "./api";
+import { api, type Book, type Overview, type TasksData } from "./api";
 import { ActivityTile } from "./components/ActivityTile";
 import { BooksTile } from "./components/BooksTile";
 import { DashboardTile } from "./components/DashboardTile";
@@ -12,7 +12,7 @@ const COMING = [
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [tasks, setTasks] = useState<{ open: Task[]; done: Task[] }>({ open: [], done: [] });
+  const [tasks, setTasks] = useState<TasksData>({ open: [], done: [], google: false, calendar: [] });
   const [books, setBooks] = useState<Book[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -61,6 +61,8 @@ export default function App() {
         <TasksTile
           open={tasks.open}
           done={tasks.done}
+          google={tasks.google}
+          calendar={tasks.calendar}
           doneToday={overview?.tasks.done_today ?? 0}
           onChange={load}
           onError={setError}

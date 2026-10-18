@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 COMMANDS = [
     ("zadania", "Lista zadań: dziś, zaległe, najbliższe"),
     ("zadanie", "Nowe zadanie, np. /zadanie jutro zadzwonić do ZUS"),
+    ("kalendarz", "Dziś i jutro: spotkania z Kalendarza Google i zadania"),
     ("ksiazki", "Książki: czytam, do przeczytania, do kupienia"),
     ("ksiazka", "Dodaj książkę, np. /ksiazka Diuna"),
     ("saldo", "Salda kont"),
@@ -35,6 +36,7 @@ COMMANDS = [
     ("inwestycje", "Wycena inwestycji (srebro, złoto, ETF)"),
     ("inwestycja", "Dodaj inwestycję, np. /inwestycja srebro 2 uncje"),
     ("multisport", "Czy karta Multisport się opłaca (Strava)"),
+    ("google", "Połącz zadania z Kalendarzem Google"),
     ("lotto", "Eurojackpot: wydane, wygrane, zwrot, szanse"),
     ("kurs", "Kursy NBP, np. /kurs 100 eur"),
     ("wyciag", "Uzgodnij wyciąg z banku (wklej treść)"),
@@ -121,7 +123,10 @@ def build(core: Core) -> Application:
     async def log_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         # Grupa -1: każda komenda trafia do dziennika, zanim obsłuży ją właściwy handler.
         text = update.effective_message.text or ""
-        core.store.log_event("command", name=text.split()[0][1:].split("@")[0] if text else "", input=text)
+        name = text.split()[0][1:].split("@")[0] if text else ""
+        if name in ("google", "strava") and len(text.split()) > 1:
+            text = f"/{name} (adres z kodem autoryzacji)"  # kodu nie trzymamy w dzienniku
+        core.store.log_event("command", name=name, input=text)
 
     app.add_handler(MessageHandler(user_filter & filters.COMMAND, log_command), group=-1)
     app.add_handler(CommandHandler("whoami", on_whoami))
@@ -165,6 +170,12 @@ def build(core: Core) -> Application:
         await send(update, await core.strava_connect(" ".join(ctx.args or [])))
 
     app.add_handler(CommandHandler("strava", on_strava, filters=user_filter))
+
+    async def on_google(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await send(update, await core.google_connect(" ".join(ctx.args or [])))
+
+    app.add_handler(CommandHandler("google", on_google, filters=user_filter))
+    app.add_handler(CommandHandler("kalendarz", cmd(core.calendar_report), filters=user_filter))
 
     async def on_dlug(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, await core.debt_add(" ".join(ctx.args or [])))

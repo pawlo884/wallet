@@ -41,6 +41,10 @@ class TaskAction(BaseModel):
     task_id: int | None = Field(description="ID zadania z listy ZADANIA (dla done/postpone); dla add null")
     title: str = Field(description="Krótko, w bezokoliczniku, po polsku, np. 'Zadzwonić do ubezpieczyciela'")
     due: str | None = Field(description="Termin YYYY-MM-DD, jeśli wynika z wiadomości (dla postpone: nowy termin); inaczej null")
+    time: str | None = Field(
+        default=None,
+        description="Godzina HH:MM, tylko gdy padła w wiadomości ('o 15' → '15:00', 'o wpół do 10' → '09:30'); inaczej null",
+    )
 
 
 class BookAction(BaseModel):
@@ -180,14 +184,17 @@ Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (
 - Zadanie ("jutro zadzwonić do ubezpieczyciela", "do soboty wymienić opony", "zadanie: oddać książkę",
   "muszę kupić prezent dla mamy") → tasks action=add, records=[]. "Muszę kupić X" bez kwoty to zadanie,
   nie wydatek. due tylko gdy termin wynika z wiadomości ("jutro", "w piątek", "do 20-go").
+  time tylko przy konkretnej godzinie ("jutro o 15 zadzwonić do ZUS" → due jutro, time 15:00); sama
+  godzina bez dnia ("o 18 trening") → due dziś, a jeśli ta godzina już minęła — jutro.
 - "zrobione: …", "zadzwoniłem do ubezpieczyciela", "odhacz …" dla zadania z listy → action=done z task_id.
-  "przesuń … na poniedziałek" → action=postpone z task_id i nowym due.
+  "przesuń … na poniedziałek" → action=postpone z task_id i nowym due (i time, jeśli padła godzina).
 - Książka ("chcę przeczytać Atomowe nawyki", "książka: Sapiens", "do kupienia: Diuna") → books action=add.
-  Status: "chcę kupić", "do kupienia", strona produktu w sklepie, koszyk, lista życzeń → to_buy;
-  "mam", "kupiona", "na półce", biblioteka/półka w aplikacji (Legimi, Empik Go, Kindle, Storytel) → to_read;
-  "czytam", "zacząłem" → reading; "przeczytałem", "skończyłem" → read. Bez wskazówek → to_buy.
-- Zrzut ekranu lub zdjęcie z książkami (okładka, strona sklepu, lista, półka) BEZ ceny zapłaconej
-  przez użytkownika → tylko books (każda widoczna książka osobno, z autorem, jeśli widać), records=[].
+  Status ZAWSZE to_buy, chyba że użytkownik SAM napisze inaczej w tekście wiadomości (podpis pod screenem
+  też się liczy): "mam", "kupiona", "kupiłem", "do przeczytania" → to_read; "czytam", "zacząłem" → reading;
+  "przeczytałem", "skończyłem" → read. To, co widać na obrazku (półka, biblioteka w Legimi/Kindle/Empik,
+  przycisk „Czytaj”, pasek postępu), NIE zmienia statusu — screen bez podpisu to zawsze to_buy.
+- Zrzut ekranu lub zdjęcie z książkami (okładka, strona sklepu, lista, półka), które nie jest
+  potwierdzeniem zakupu → tylko books (każda widoczna książka osobno, z autorem, jeśli widać), records=[].
   Potwierdzenie zakupu / paragon z książkami → records (wydatek) ORAZ books ze statusem to_read.
 - Książka, która już jest na liście KSIĄŻKI → action=status z book_id (np. kupiona → to_read), nie add.
   Zakup książki z listy ("kupiłem Atomowe nawyki 45 zł") → wydatek w records + books status to_read.
