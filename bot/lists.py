@@ -294,7 +294,7 @@ albo `/zadanie kupić prezent dla mamy`.
 Odhaczanie: „zadzwoniłem do ubezpieczyciela” albo przycisk w `/zadania`."""
 
 BOOKS_HELP = """📚 Lista książek jest pusta. Dodaj je:
-• wyślij *screena* okładki, strony sklepu albo swojej półki (Legimi, Empik, Kindle),
+• wyślij *screena* okładki, strony sklepu albo listy (domyślnie 🛒 do kupienia; dopisz „mam”, jeśli już masz),
 • napisz `chcę przeczytać Atomowe nawyki` albo `mam już Sapiensa`,
 • `/ksiazka Diuna Frank Herbert`.
 

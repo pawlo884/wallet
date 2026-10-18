@@ -83,7 +83,8 @@ na 📚 *do przeczytania*.
   „w piątek”, „do 20-go”). Odhaczasz zdaniem („zadzwoniłem do ubezpieczyciela”) albo w `/zadania`.
   Bot liczy przesunięcia; przy trzecim pyta, czy rozbić zadanie albo je skreślić.
 - **Książki** mają cztery statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane.
-  Screen strony sklepu albo listy życzeń = do kupienia, screen półki/biblioteki („mam”) = do przeczytania.
+  Nowa książka jest zawsze 🛒 *do kupienia*, chyba że dopiszesz inaczej (np. podpis pod screenem „mam”,
+  „czytam”, „przeczytana”). Co widać na screenie (półka w Legimi, Kindle), statusu nie zmienia.
   Każda widoczna książka osobno, z autorem. Ta sama książka drugi raz nie jest dublowana.
 
 ### Kalendarz Google
