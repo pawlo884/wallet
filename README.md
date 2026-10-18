@@ -85,6 +85,8 @@ na 📚 *do przeczytania*.
 - **Książki** mają cztery statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane.
   Nowa książka jest zawsze 🛒 *do kupienia*, chyba że dopiszesz inaczej (np. podpis pod screenem „mam”,
   „czytam”, „przeczytana”). Co widać na screenie (półka w Legimi, Kindle), statusu nie zmienia.
+- **Okładki** w panelu bot znajduje sam po tytule i autorze (Google Books, a gdy nie ma — Open Library),
+  w tle zaraz po dodaniu książki. Brak okładki = kafelek z tytułem.
   Każda widoczna książka osobno, z autorem. Ta sama książka drugi raz nie jest dublowana.
 
 ### Kalendarz Google

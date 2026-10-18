@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS books (
     note TEXT,
     key TEXT NOT NULL UNIQUE,      -- tytuł bez wielkości liter i ogonków (żeby nie dublować)
     created_at REAL NOT NULL,
-    status_at REAL NOT NULL
+    status_at REAL NOT NULL,
+    cover_url TEXT                 -- okładka do panelu: NULL = nie szukano, "" = nie znaleziono
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 """
 
 # kolumny dodane po pierwszym wdrożeniu (CREATE TABLE IF NOT EXISTS nie zmienia istniejącej tabeli)
-MIGRATIONS = {"tasks": {"due_time": "TEXT", "gcal_id": "TEXT"}}
+MIGRATIONS = {"tasks": {"due_time": "TEXT", "gcal_id": "TEXT"}, "books": {"cover_url": "TEXT"}}
 
 EVENTS_KEEP_DAYS = 180
 
@@ -105,6 +106,7 @@ class Book:
     key: str
     created_at: float
     status_at: float
+    cover_url: str | None = None
 
     def label(self) -> str:
         return f"{self.title} — {self.author}" if self.author else self.title
@@ -200,6 +202,10 @@ class Store:
         )
         return self.book(cur.lastrowid), True
 
+    def books_without_cover(self, limit: int = 20) -> list[Book]:
+        rows = self.db.execute("SELECT * FROM books WHERE cover_url IS NULL ORDER BY id DESC LIMIT ?", (limit,))
+        return [Book(**dict(r)) for r in rows]
+
     def book(self, bid: int) -> Book | None:
         row = self.db.execute("SELECT * FROM books WHERE id = ?", (bid,)).fetchone()
         return Book(**dict(row)) if row else None
@@ -214,6 +220,9 @@ class Store:
 
     def set_book_status(self, bid: int, status: str) -> None:
         self.db.execute("UPDATE books SET status = ?, status_at = ? WHERE id = ?", (status, time.time(), bid))
+
+    def set_book_cover(self, bid: int, url: str) -> None:
+        self.db.execute("UPDATE books SET cover_url = ? WHERE id = ?", (url, bid))
 
     def delete_book(self, bid: int) -> None:
         self.db.execute("DELETE FROM books WHERE id = ?", (bid,))
