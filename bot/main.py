@@ -45,6 +45,10 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
         except Exception:
             log.exception("Błąd pętli przypomnień")
         try:
+            await core.calendar_pull()  # zmiany zrobione w samym Kalendarzu Google
+        except Exception:
+            log.exception("Zmiany z Kalendarza Google")
+        try:
             if alert := core.budget_alert():  # koszt modelu ponad LLM_BUDGET_USD — raz w miesiącu
                 for notify in notifiers:
                     await notify(alert)

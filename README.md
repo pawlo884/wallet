@@ -94,7 +94,9 @@ zakłada go sam): bez godziny jako całodniowe, z godziną („jutro o 15 zadzwo
 Odhaczenie, przesunięcie i usunięcie — w bocie albo w panelu — zmienia wydarzenie; zrobione zostają
 w kalendarzu jako „✅ …” na szaro. Bot czyta też Twoje widoczne kalendarze: dzisiejsze spotkania są
 w `/zadania`, dziś i jutro w `/kalendarz`, 7 dni w panelu, a przy zadaniu z godziną bot ostrzega
-„⚠️ O 15:00 masz już: …”. Zmiany wydarzeń wprost w Google nie wracają do listy zadań.
+„⚠️ O 15:00 masz już: …”. Działa też w drugą stronę: wydarzenie usunięte w kalendarzu „Zadania” usuwa
+zadanie, przeniesione zmienia termin, a zmieniona nazwa tytuł (bot sprawdza co 5 minut i przy `/zadania`,
+`/kalendarz` i w panelu).
 
 Konfiguracja (raz):
 1. https://console.cloud.google.com → nowy projekt → *APIs & Services → Library* → **Google Calendar API** → Enable.
