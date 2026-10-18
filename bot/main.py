@@ -44,6 +44,7 @@ async def reminder_loop(core: Core, notifiers: list) -> None:
                         await notify(reply)
         except Exception:
             log.exception("Błąd pętli przypomnień")
+        core.find_covers()  # okładki do panelu (też dla książek sprzed tej funkcji)
         try:
             await core.calendar_pull()  # zmiany zrobione w samym Kalendarzu Google
         except Exception:

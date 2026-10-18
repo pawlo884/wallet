@@ -165,6 +165,7 @@ def routes(core: "Core") -> list[web.RouteDef]:
         if not title or status not in BOOK_STATUSES:
             return _err("Podaj tytuł i poprawny status")
         b, created = store.add_book(title, (data.get("author") or None), status)
+        core.find_covers()
         logged("book_add", {"id": b.id, "title": b.title, "created": created})
         return _json({**asdict(b), "created": created}, 201 if created else 200)
 

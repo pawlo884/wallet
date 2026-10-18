@@ -39,6 +39,7 @@ export interface Book {
   author: string | null;
   status: BookStatus;
   note: string | null;
+  cover_url: string | null; // null = jeszcze szukamy, "" = brak okładki
   created_at: number;
   status_at: number;
 }

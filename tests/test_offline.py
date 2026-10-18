@@ -6,6 +6,7 @@ import os
 os.environ.setdefault("WALLET_API_TOKEN", "x")
 os.environ.setdefault("ANTHROPIC_API_KEY", "x")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123:abc")
+os.environ["BOOK_COVERS"] = "off"  # okładki szukają w sieci; covers_test włącza je z atrapą
 # stan (w tym szkice z data/session.json) w katalogu tymczasowym, nie w repo
 import tempfile as _tempfile
 os.environ.setdefault("STATE_FILE", os.path.join(_tempfile.mkdtemp(), "state.json"))
@@ -1240,3 +1241,55 @@ async def gcal_test():
 
 
 asyncio.run(gcal_test())
+
+
+async def covers_test():
+    """Okładki: Google Books, a przy braku/limicie Open Library; szukane w tle, raz na książkę."""
+    import tempfile
+    from pathlib import Path
+    import httpx
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+    asked = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        asked.append((req.url.host, dict(req.url.params)))
+        if req.url.host == "www.googleapis.com":
+            q = req.url.params["q"]
+            if "Diuna" in q:
+                return httpx.Response(200, json={"items": [{"volumeInfo": {"imageLinks": {
+                    "thumbnail": "http://books.google.com/books/content?id=x&zoom=1&edge=curl&source=gbs_api"}}}]})
+            if "Limit" in q:
+                return httpx.Response(429)
+            return httpx.Response(200, json={})
+        if "Nieznana" in req.url.params["title"]:
+            return httpx.Response(200, json={"docs": [{}]})
+        return httpx.Response(200, json={"docs": [{"cover_i": 12345}]})
+
+    os.environ["BOOK_COVERS"] = "on"
+    core = Core(Config())
+    await core._covers_http.aclose()
+    core._covers_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    diuna, _ = core.store.add_book("Diuna", "Frank Herbert", "to_buy")
+    sapiens, _ = core.store.add_book("Sapiens", "Yuval Noah Harari, Justyna Hunia", "to_read")
+    limit, _ = core.store.add_book("Limit", None, "to_buy")
+    unknown, _ = core.store.add_book("Nieznana książka", None, "to_buy")
+    core.find_covers()
+    core.find_covers()  # drugie wywołanie w trakcie nie startuje drugiego szukania
+    await core.calendar_idle()
+    covers = {b.title: b.cover_url for b in core.store.books()}
+    print(covers)
+    assert covers["Diuna"] == "https://books.google.com/books/content?id=x&zoom=1&source=gbs_api"
+    assert covers["Sapiens"] == covers["Limit"] == "https://covers.openlibrary.org/b/id/12345-M.jpg"
+    assert covers["Nieznana książka"] == "", "szukane, nie ma — nie pytamy ponownie"
+    assert ("www.googleapis.com", {"q": "intitle:Sapiens inauthor:Yuval Noah Harari", "maxResults": "5",
+            "printType": "books", "fields": "items(volumeInfo(title,imageLinks))"}) in asked
+    n = len(asked)
+    core.find_covers()
+    await core.calendar_idle()
+    assert len(asked) == n, "każda książka szukana raz"
+    await core.close()
+    print("\nOK okładki")
+
+
+asyncio.run(covers_test())

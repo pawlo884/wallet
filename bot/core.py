@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import secrets
 import time
@@ -9,6 +10,8 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
+
+import httpx
 
 from . import events
 from .config import Config
@@ -109,6 +112,8 @@ class Core:
         self.gcal = GoogleCalendar(self)  # zadania ↔ Kalendarz Google (data/google.json)
         self._gcal_lock = asyncio.Lock()  # zmiany wysyłane po kolei, żeby nie zdublować wydarzenia
         self._bg: set[asyncio.Task] = set()
+        self._covers_http = httpx.AsyncClient(timeout=15, headers={"User-Agent": "wallet-bot/1.0 (book covers)"})
+        self._covers_running = False
         self.memory = Memory(self)  # sprzedawca → jak ostatnio zapisany (data/learned.json)
         # Krótka pamięć rozmowy (w RAM): właściciel → [(czas, rola, tekst)]
         self._history: dict[str, list[tuple[float, str, str]]] = {}
@@ -282,6 +287,8 @@ class Core:
         events.agent_var.set("+".join(agents) or "wydatki")
         # Zadania i książki od razu na listę (z ↩️ Cofnij); transakcje jak dotąd jako szkic do ✅.
         item_lines, undo_key = self.lists.apply(result.tasks, result.books)
+        if result.books:
+            self.find_covers()
         item_lines += await self._calendar_warnings(self.lists.changed)
         if not result.records:
             if not item_lines:
@@ -1027,6 +1034,29 @@ class Core:
         self._bg.add(task)
         task.add_done_callback(self._bg.discard)
 
+    def find_covers(self) -> None:
+        """W tle: okładki dla książek, które jeszcze ich nie mają (po dodaniu i co obrót pętli)."""
+        if os.getenv("BOOK_COVERS", "on") == "off":  # testy offline: bez sieci
+            return
+        if not self._covers_running and self.store.books_without_cover(1):
+            self._covers_running = True
+            self._spawn(self._find_covers())
+
+    async def _find_covers(self) -> None:
+        from .covers import find_cover
+
+        try:
+            for b in self.store.books_without_cover():
+                try:
+                    url = await find_cover(self._covers_http, b.title, b.author)
+                except Exception as e:  # sieć — spróbujemy przy następnym obrocie pętli
+                    log.warning("Okładka „%s”: %r", b.title, e)
+                    return
+                if self.store.book(b.id):
+                    self.store.set_book_cover(b.id, url)
+        finally:
+            self._covers_running = False
+
     async def calendar_idle(self) -> None:
         """Czeka, aż skończą się synchronizacje w tle (testy, zamykanie)."""
         while self._bg:
@@ -1216,6 +1246,7 @@ class Core:
         await self.strava.close()
         await self.calendar_idle()
         await self.gcal.close()
+        await self._covers_http.aclose()
 
 
 def _ms(started: float) -> int:
