@@ -97,6 +97,27 @@ i czas. Wpisy jednej wiadomości łączy wspólny `trace`. Wpisy starsze niż 18
 - Podgląd z serwera: `docker compose exec wallet-bot python -c "import sqlite3; [print(dict(r)) for r in
   sqlite3.connect('data/assistant.db').execute('select * from events order by id desc limit 5')]"`.
 
+## Panel WWW (React)
+
+Pod `/panel/` na tym samym adresie co prognoza (np. `https://wallet.sowa.ch/panel/`) bot serwuje panel
+w React (Vite + Tailwind, ten sam styl co Life OS):
+
+- **Zadania**: dodawanie z terminem, odhaczanie, „Jutro” / „+7 dni”, usuwanie, zrobione z ostatniego tygodnia.
+- **Książki**: kolumny czytam / do przeczytania / do kupienia, przycisk następnego kroku („Kupiona →”,
+  „Zaczynam →”, „Przeczytana →”), dodawanie i usuwanie.
+- **Wydatki**: przychody, wydatki, bilans i największe kategorie w tym miesiącu (z Wallet) + link do prognozy.
+- **Co robi bot**: koszt modelu dziś i w miesiącu (z limitem), mapa aktywności z 13 tygodni, koszt dzienny,
+  dziennik zdarzeń z filtrami (wiadomości, model, przyciski, komendy, od bota, panel, błędy); kliknięcie
+  wiersza pokazuje wejście i odpowiedź.
+
+Panel odświeża się co minutę, więc zmiany z Telegrama widać bez przeładowania. Zmiany z panelu trafiają
+do dziennika jako zdarzenia `panel`. Nie ma własnego logowania: dostęp ustawia lista dostępu w NPM, tak jak
+dla prognozy. API przyjmuje zapisy tylko jako JSON (`/api/v1/...`, `bot/panel_api.py`).
+
+Front buduje się w pierwszym etapie `Dockerfile` (`frontend/` → `bot/static/panel`). Lokalnie:
+`cd frontend && npm install && npm run dev` (zapytania `/api` idą do bota na `localhost:8080`,
+inny adres: `BOT_URL=http://… npm run dev`).
+
 ## Głosówki (mowa → tekst)
 
 Wyślij wiadomość głosową na Telegramie, np. *„biedronka pięćdziesiąt cztery trzydzieści”*.
@@ -246,7 +267,8 @@ bot/
   planned.py       płatności cykliczne: harmonogram, przypomnienia, stan
   debts.py         długi bez stałych rat i kredyty ratalne (etykiety w Wallet)
   forecast.py      prognoza na 12 miesięcy
-  web.py           strona prognozy (port 8080, sieć NPM)
+  web.py           strona prognozy i panel /panel/ (port 8080, sieć NPM)
+  panel_api.py     JSON API panelu: zadania, książki, dziennik, podsumowanie (/api/v1)
   statement.py     wyciągi z banku: uzgadnianie z Wallet, skrzynka IMAP
   investments.py   metale i ETF/akcje z wyceną na żywo
   multisport.py    opłacalność karty Multisport
@@ -254,6 +276,7 @@ bot/
   strava.py        połączenie ze Stravą (OAuth, aktywności)
   fx.py            kursy NBP
   stt.py           mowa → tekst (faster-whisper, lokalnie)
+frontend/          panel w React (Vite + Tailwind), budowany w Dockerfile
   wallet_api.py    klient Wallet REST API (paginacja, 409 sync, 429 limit)
   telegram_bot.py  adapter Telegram (python-telegram-bot)
   config.py        zmienne środowiskowe

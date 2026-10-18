@@ -3,3 +3,7 @@
 .venv
 __pycache__
 *.md
+frontend/node_modules
+frontend/dist
+bot/static
+data
