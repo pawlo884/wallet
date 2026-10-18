@@ -17,6 +17,9 @@ from .core import HELP, Core, Reply
 
 log = logging.getLogger(__name__)
 
+ALBUM_WAIT = 2.0  # s — tyle czekamy na resztę zdjęć z albumu
+MAX_IMAGES = 10  # Telegram pozwala na 10 zdjęć w albumie
+
 
 # Lista komend widoczna w Telegramie (kolejność = kolejność w menu).
 COMMANDS = [
@@ -83,9 +86,12 @@ def build(core: Core) -> Application:
         # Działa także dla osób spoza listy — żeby dało się odczytać ID do konfiguracji.
         await update.effective_message.reply_text(f"Twoje Telegram ID: {update.effective_user.id}")
 
+    # Album (kilka zdjęć naraz) przychodzi jako osobne wiadomości z tym samym media_group_id.
+    # Zbieramy je chwilę i wysyłamy do modelu razem: jedna odpowiedź, bez dublowania książek.
+    albums: dict[str, dict] = {}
+
     async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.effective_message
-        await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
         images = []
         if msg.photo:
             f = await msg.photo[-1].get_file()
@@ -94,6 +100,26 @@ def build(core: Core) -> Application:
             f = await msg.document.get_file()
             images.append((bytes(await f.download_as_bytearray()), msg.document.mime_type))
         text = msg.text or msg.caption or ""
+        if group := msg.media_group_id:
+            album = albums.get(group)
+            if album:  # kolejne zdjęcie albumu — dołącza do pierwszego
+                album["images"] += images
+                album["text"] = album["text"] or text
+                return
+            albums[group] = {"images": images, "text": text}
+            await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+            # Handlery idą po kolei, więc czekamy w osobnym zadaniu — inaczej reszta albumu by nie doszła.
+            ctx.application.create_task(finish_album(update, group))
+            return
+        await ctx.bot.send_chat_action(msg.chat_id, ChatAction.TYPING)
+        await answer(update, text, images)
+
+    async def finish_album(update: Update, group: str) -> None:
+        await asyncio.sleep(ALBUM_WAIT)
+        album = albums.pop(group)
+        await answer(update, album["text"], album["images"][:MAX_IMAGES])
+
+    async def answer(update: Update, text: str, images: list) -> None:
         try:
             reply = await core.handle_message(f"tg:{update.effective_user.id}", text, images)
         except Exception:

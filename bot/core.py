@@ -277,7 +277,7 @@ class Core:
         item_lines += await self._calendar_warnings(self.lists.changed)
         if not result.records:
             if not item_lines:
-                return Reply(result.question or "Nie widzę tu transakcji. Napisz np. „biedronka 54,30”.")
+                return Reply(result.question or "Nie widzę tu transakcji, zadania ani książki. Napisz np. „biedronka 54,30”.")
             if result.question:
                 item_lines.append(f"\n❓ {result.question}")
             return Reply("\n".join(item_lines), [("↩️ Cofnij", f"iu:{undo_key}")] if undo_key else [])
