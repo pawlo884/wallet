@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Book, type Overview, type TasksData } from "./api";
+import { api, type Book, type Overview, type ReadingStats, type TasksData } from "./api";
 import { ActivityTile } from "./components/ActivityTile";
 import { BooksTile } from "./components/BooksTile";
 import { DashboardTile } from "./components/DashboardTile";
@@ -14,6 +14,7 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tasks, setTasks] = useState<TasksData>({ open: [], done: [], google: false, calendar: [] });
   const [books, setBooks] = useState<Book[]>([]);
+  const [reading, setReading] = useState<ReadingStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -21,6 +22,7 @@ export default function App() {
     const [t, b] = await Promise.all([api.tasks(), api.books()]);
     setTasks(t);
     setBooks(b.books);
+    setReading(b.reading);
     setRefreshKey((k) => k + 1);
     api.overview().then(setOverview).catch((e) => setError(e.message)); // Wallet bywa wolny — nie blokuje list
   }, []);
@@ -67,7 +69,7 @@ export default function App() {
           onChange={load}
           onError={setError}
         />
-        <BooksTile books={books} onChange={load} onError={setError} />
+        <BooksTile books={books} reading={reading} onChange={load} onError={setError} />
         <MoneyTile overview={overview} />
         {COMING.map((c) => (
           <DashboardTile key={c.title} title={c.title} subtitle={c.subtitle} accent={c.accent} comingSoon>

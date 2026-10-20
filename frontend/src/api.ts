@@ -40,8 +40,19 @@ export interface Book {
   status: BookStatus;
   note: string | null;
   cover_url: string | null; // null = jeszcze szukamy, "" = brak okładki
+  pages: number | null; // liczba stron; 0/null = nie wiemy
+  page: number; // strona, na której jestem
   created_at: number;
   status_at: number;
+}
+
+export interface ReadingStats {
+  today: number;
+  week: number;
+  month: number;
+  year: number;
+  last7: number;
+  days: [string, number][]; // ostatnie 14 dni: [YYYY-MM-DD, strony]
 }
 
 export interface EventRow {
@@ -112,10 +123,13 @@ export const api = {
   updateTask: (id: number, patch: Partial<Pick<Task, "title" | "due" | "due_time" | "status">>) =>
     send<Task>("PATCH", `/tasks/${id}`, patch),
   deleteTask: (id: number) => send<{ ok: true }>("DELETE", `/tasks/${id}`),
-  books: () => request<{ books: Book[]; statuses: Record<BookStatus, string> }>("/books"),
+  books: () =>
+    request<{ books: Book[]; statuses: Record<BookStatus, string>; reading: ReadingStats }>("/books"),
   addBook: (title: string, author: string | null, status: BookStatus) =>
     send<Book & { created: boolean }>("POST", "/books", { title, author, status }),
   setBookStatus: (id: number, status: BookStatus) => send<Book>("PATCH", `/books/${id}`, { status }),
+  setBookPage: (id: number, page: number | null, pages: number | null) =>
+    send<Book>("PATCH", `/books/${id}`, { page, pages }),
   deleteBook: (id: number) => send<{ ok: true }>("DELETE", `/books/${id}`),
   events: (kind?: string, before?: number) => {
     const q = new URLSearchParams({ limit: "50" });
