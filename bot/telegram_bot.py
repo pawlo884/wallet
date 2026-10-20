@@ -62,11 +62,35 @@ def _markup(reply: Reply) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup([[b] for b in buttons] if reply.column else [buttons])
 
 
+MAX_TEXT = 4000  # Telegram odrzuca wiadomości dłuższe niż 4096 znaków
+
+
+def _chunks(text: str, limit: int = MAX_TEXT) -> list[str]:
+    """Długi tekst (np. /ksiazki z setką pozycji) w kilku wiadomościach, cięty na końcach linii."""
+    parts: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        cut = cut if cut > 0 else limit
+        parts.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return parts + [text]
+
+
 async def _send(bot, chat_id: int, reply: Reply) -> None:
-    try:
-        await bot.send_message(chat_id, reply.text, parse_mode=ParseMode.MARKDOWN, reply_markup=_markup(reply))
-    except Exception:  # np. znak psujący Markdown w nazwie sklepu
-        await bot.send_message(chat_id, reply.text, reply_markup=_markup(reply))
+    parts = _chunks(reply.text)
+    for i, part in enumerate(parts):
+        markup = _markup(reply) if i == len(parts) - 1 else None  # przyciski pod ostatnią częścią
+        try:
+            await bot.send_message(chat_id, part, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+            continue
+        except Exception:  # np. znak psujący Markdown w nazwie sklepu
+            pass
+        try:
+            await bot.send_message(chat_id, part, reply_markup=markup)
+        except Exception as e:  # zamiast ciszy: ślad w /log i krótka informacja
+            log.exception("Telegram: nie udało się wysłać odpowiedzi")
+            await bot.send_message(chat_id, f"⚠️ Nie udało się wysłać odpowiedzi: {str(e)[:200]}")
+            raise
 
 
 def build(core: Core) -> Application:
@@ -77,7 +101,23 @@ def build(core: Core) -> Application:
 
     async def send(update: Update, replies: Reply | list[Reply]) -> None:
         for reply in replies if isinstance(replies, list) else [replies]:
-            await _send(update.get_bot(), update.effective_chat.id, reply)
+            try:
+                await _send(update.get_bot(), update.effective_chat.id, reply)
+            except Exception as e:
+                core.store.log_event("error", name="telegram", input=reply.text[:300], output=repr(e)[:300])
+                return
+
+    async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        # Wyjątek w handlerze (np. komendzie) — inaczej użytkownik widzi tylko ciszę.
+        log.error("Błąd w handlerze Telegrama", exc_info=ctx.error)
+        core.store.log_event("error", name="telegram", output=repr(ctx.error)[:300])
+        if isinstance(update, Update) and update.effective_chat:
+            try:
+                await ctx.bot.send_message(update.effective_chat.id, "⚠️ Coś poszło nie tak. Szczegóły w /log.")
+            except Exception:
+                pass
+
+    app.add_error_handler(on_error)
 
     async def on_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await send(update, Reply(HELP + f"\n\nTwoje Telegram ID: `{update.effective_user.id}`"))

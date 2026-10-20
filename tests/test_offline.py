@@ -1293,3 +1293,49 @@ async def covers_test():
 
 
 asyncio.run(covers_test())
+
+
+async def telegram_send_test():
+    """Długa odpowiedź (np. /ksiazki z setką pozycji) idzie w częściach; błąd wysyłki nie kończy się ciszą."""
+    import tempfile
+    from pathlib import Path
+    from bot import telegram_bot
+    from bot.telegram_bot import MAX_TEXT, _chunks, _send
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+    core = Core(Config())
+    for i in range(150):
+        core.store.add_book(f"Książka numer {i} o bardzo długim tytule_{i}", "Autor *Gwiazdka*", "to_buy")
+    reply = core.lists.books_view()
+    assert len(reply.text) > 4096, len(reply.text)
+    parts = _chunks(reply.text)
+    assert len(parts) > 1 and all(len(p) <= MAX_TEXT for p in parts)
+    assert "\n".join(parts).replace("\n", "") == reply.text.replace("\n", "")
+
+    class Bot:
+        def __init__(self, fail=0):
+            self.sent, self.fail = [], fail
+        async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
+            if len(text) > 4096:
+                raise Exception("Message is too long")
+            if self.fail:
+                self.fail -= 1
+                raise Exception("Bad Request")
+            self.sent.append((text, reply_markup))
+
+    bot = Bot()
+    await _send(bot, 1, reply)
+    assert len(bot.sent) == len(parts)
+    assert all(m is None for _, m in bot.sent[:-1]) and bot.sent[-1][1] is not None, "przyciski pod ostatnią"
+    bot = Bot(fail=2)  # Markdown i zwykły tekst odrzucone → informacja zamiast ciszy
+    try:
+        await _send(bot, 1, telegram_bot.Reply("x"))
+        raise AssertionError("powinien zgłosić błąd")
+    except Exception as e:
+        assert "Bad Request" in str(e)
+    assert bot.sent and bot.sent[0][0].startswith("⚠️ Nie udało się wysłać")
+    await core.close()
+    print("\nOK wysyłka Telegram")
+
+
+asyncio.run(telegram_send_test())
