@@ -1048,12 +1048,12 @@ class Core:
         try:
             for b in self.store.books_without_cover():
                 try:
-                    url = await find_cover(self._covers_http, b.title, b.author)
+                    url, pages = await find_cover(self._covers_http, b.title, b.author)
                 except Exception as e:  # sieć — spróbujemy przy następnym obrocie pętli
                     log.warning("Okładka „%s”: %r", b.title, e)
                     return
                 if self.store.book(b.id):
-                    self.store.set_book_cover(b.id, url)
+                    self.store.set_book_cover(b.id, url, pages)  # liczba stron tylko, gdy jeszcze jej nie ma
         finally:
             self._covers_running = False
 

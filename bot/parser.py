@@ -48,15 +48,22 @@ class TaskAction(BaseModel):
 
 
 class BookAction(BaseModel):
-    action: Literal["add", "status"] = Field(
-        description="add = nowa książka na liście; status = zmiana statusu książki z listy KSIĄŻKI"
+    action: Literal["add", "status", "progress"] = Field(
+        description="add = nowa książka na liście; status = zmiana statusu książki z listy KSIĄŻKI; "
+        "progress = postęp czytania książki z listy (strona / przeczytane strony / liczba stron)"
     )
-    book_id: int | None = Field(description="ID książki z listy KSIĄŻKI (dla status); dla add null")
+    book_id: int | None = Field(description="ID książki z listy KSIĄŻKI (dla status i progress); dla add null")
     title: str = Field(description="Tytuł książki (bez autora)")
     author: str | None = Field(description="Autor, jeśli znany z wiadomości lub zdjęcia; inaczej null")
     status: Literal["to_buy", "to_read", "reading", "read"] = Field(
         description="to_buy = do kupienia, to_read = mam / kupiona, czeka na czytanie, reading = czytam, read = przeczytana"
     )
+    page: int | None = Field(default=None, description="progress: strona, na której użytkownik jest teraz "
+                             "(„jestem na 120 stronie”); inaczej null")
+    pages_read: int | None = Field(default=None, description="progress: ile stron przeczytał od ostatniego razu "
+                                   "(„przeczytałem 30 stron”); inaczej null")
+    total_pages: int | None = Field(default=None, description="Liczba stron książki, jeśli użytkownik ją podał "
+                                    "(„Diuna ma 600 stron”); inaczej null")
 
 
 class BookSeen(BaseModel):
@@ -226,6 +233,12 @@ Jesteś też osobistym asystentem: prowadzisz listę ZADAŃ i listę KSIĄŻEK (
   Potwierdzenie zakupu / paragon z książkami → records (wydatek) ORAZ books ze statusem to_read.
 - Książka, która już jest na liście KSIĄŻKI → action=status z book_id (np. kupiona → to_read), nie add.
   Zakup książki z listy ("kupiłem Atomowe nawyki 45 zł") → wydatek w records + books status to_read.
+- Postęp czytania ("przeczytałem 30 stron Diuny", "jestem na 120 stronie", "Diuna ma 600 stron",
+  "dziś 20 stron") → books action=progress z book_id książki z listy: page (strona, na której jest) ALBO
+  pages_read (ile stron przybyło), total_pages, gdy poda liczbę stron; status=reading (read, gdy skończył).
+  Bez tytułu → książka, którą czyta (status reading na liście KSIĄŻKI); kilka takich → zapytaj w question.
+  Książki nie ma na liście → action=add ze status=reading i tym samym page/pages_read.
+- Pytanie o czytanie ("ile stron przeczytałem w tym tygodniu?") → odpowiedz w question z bloku CZYTANIE.
 - Zadania i książki to nie transakcje: nie twórz dla nich rekordów i nie pytaj o kwotę.
 
 Rozmowa: widzisz kilka ostatnich wiadomości. Używaj ich jako kontekstu:

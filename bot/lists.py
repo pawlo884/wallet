@@ -2,7 +2,7 @@
 
 import re
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from typing import TYPE_CHECKING
 
 from .parser import BookAction, TaskAction
@@ -53,8 +53,11 @@ class Lists:
         books = [b for b in self.store.books() if b.status != "read"][:80]
         lines = ["ZADANIA (otwarte; id | tytuł | termin):"]
         lines += [f"{t.id} | {t.title} | {t.due or '-'}{' ' + t.due_time if t.due_time else ''}" for t in tasks] or ["(brak)"]
-        lines.append("\nKSIĄŻKI (id | tytuł | autor | status):")
-        lines += [f"{b.id} | {b.title} | {b.author or '-'} | {b.status}" for b in books] or ["(brak)"]
+        lines.append("\nKSIĄŻKI (id | tytuł | autor | status | postęp):")
+        lines += [f"{b.id} | {b.title} | {b.author or '-'} | {b.status} | {b.progress() or '-'}" for b in books] or ["(brak)"]
+        st = self.reading_stats()
+        lines.append(f"\nCZYTANIE (przeczytane strony): dziś {st['today']}, ten tydzień {st['week']}, "
+                     f"ten miesiąc {st['month']}, ten rok {st['year']}, ostatnie 7 dni {st['last7']}")
         lines.append(f"\n(teraz {today.isoformat()} {self.core.now():%H:%M})")
         return "\n".join(lines)
 
@@ -93,20 +96,28 @@ class Lists:
                 self._changed(t.id)
                 lines.append(f"⏭ Przesunięte: *{t.title}* → {fmt_when(self.store.task(t.id), today) or 'bez terminu'}")
         for a in books:
+            progress = a.page is not None or a.pages_read is not None or a.total_pages is not None
             if a.action == "add" or not (b := self.store.book(a.book_id or 0)):
                 if not a.title.strip():
                     continue
                 b, created = self.store.add_book(a.title, a.author, a.status)
                 if created:
                     undo.append(["book_add", b.id])
-                    lines.append(f"📚 Dodana: *{b.label()}* · {BOOK_STATUSES[b.status]}")
+                    if progress:  # nowa książka od razu z postępem („czytam Diunę, jestem na 50”)
+                        self.progress(self.store.book(b.id), a, [])
+                        b = self.store.book(b.id)
+                    lines.append(f"📚 Dodana: *{b.label()}* · {BOOK_STATUSES[b.status]}"
+                                 + (f" · {b.progress()}" if b.progress() else ""))
                     continue
-                if b.status == a.status:
+                if b.status == a.status and not progress:
                     lines.append(f"📚 Już jest na liście: *{b.label()}* · {BOOK_STATUSES[b.status]}")
                     continue
+            if progress:
+                lines.append(self.progress(b, a, undo))
+                continue
             if b.status != a.status:
-                undo.append(["book_status", b.id, b.status])
-                self.store.set_book_status(b.id, a.status)
+                rid = self.store.set_book_status(b.id, a.status)
+                undo.append(["book_status", b.id, b.status, rid])
                 lines.append(f"📚 *{b.label()}* → {BOOK_STATUSES[a.status]}")
         if not undo:
             return lines, None
@@ -132,7 +143,66 @@ class Lists:
                 self.store.delete_book(oid)
             elif kind == "book_status":
                 self.store.set_book_status(oid, op[2])
+                if len(op) > 3 and op[3]:  # „przeczytana” doliczyła resztę stron
+                    self.store.delete_reading(op[3])
+            elif kind == "book_page":  # ["book_page", id, stara_strona, stara_liczba_stron, id_wpisu, stary_status]
+                self.store.set_book_pages(oid, op[3])
+                self.store.db.execute("UPDATE books SET page = ? WHERE id = ?", (op[2], oid))
+                if op[4]:
+                    self.store.delete_reading(op[4])
+                if op[5]:
+                    self.store.set_book_status(oid, op[5])
         return "↩️ Cofnięte."
+
+    def progress(self, b: Book, a: BookAction, undo: list) -> str:
+        """Postęp czytania: strona / przeczytane strony / liczba stron. Zwraca linię opisu."""
+        old_page, old_pages, old_status = b.page, b.pages, b.status
+        if a.total_pages and a.total_pages > 0:
+            self.store.set_book_pages(b.id, min(a.total_pages, 20000))
+        page = b.page
+        if a.page is not None:
+            page = a.page
+        elif a.pages_read:
+            page = b.page + a.pages_read
+        pages = self.store.book(b.id).pages
+        if pages:
+            page = min(page, pages)
+        rid = self.store.set_book_page(b.id, page) if page != b.page else None
+        status = b.status  # sama liczba stron nie zmienia statusu
+        if a.status == "read" or (pages and page >= pages > 0):
+            status = "read"
+        elif page > old_page and b.status != "read":
+            status = "reading"
+        if status != b.status:
+            self.store.set_book_status(b.id, status)
+        undo.append(["book_page", b.id, old_page, old_pages, rid, old_status if status != old_status else None])
+        b = self.store.book(b.id)
+        gained = page - old_page
+        line = f"📖 *{b.label()}*" + (f" · {b.progress()}" if b.progress() else "")
+        if gained > 0:
+            line += f" (+{gained} str.)"
+        if b.status == "read" and old_status != "read":
+            line += "\n🎉 Gratulacje! Kolejna przeczytana."
+        st = self.reading_stats()
+        if gained > 0:
+            line += f"\nDziś: {st['today']} str. · ten tydzień: {st['week']} str."
+        return line
+
+    def reading_stats(self) -> dict[str, int]:
+        """Przeczytane strony: dziś, ten tydzień (od poniedziałku), miesiąc, rok, ostatnie 7 dni."""
+        tz = self.core.cfg.tz
+        today = self.core.today()
+
+        def ts(d: date) -> float:
+            return datetime.combine(d, dtime(), tz).timestamp()
+
+        return {
+            "today": self.store.pages_read(ts(today)),
+            "week": self.store.pages_read(ts(today - timedelta(days=today.weekday()))),
+            "month": self.store.pages_read(ts(today.replace(day=1))),
+            "year": self.store.pages_read(ts(today.replace(month=1, day=1))),
+            "last7": self.store.pages_read(ts(today - timedelta(days=6))),
+        }
 
     def _changed(self, tid: int) -> None:
         self.changed.append(tid)
@@ -192,15 +262,21 @@ class Lists:
         for b in books:
             by_status.setdefault(b.status, []).append(b)
         lines = [f"📚 *Książki ({len(books)})*"]
+        st = self.reading_stats()
+        if st["year"]:
+            lines.append(f"📈 Przeczytane strony: dziś {st['today']} · tydzień {st['week']} · "
+                         f"miesiąc {st['month']} · rok {st['year']}")
         for status in ("reading", "to_read", "to_buy"):
             group = by_status[status]
             if group:
                 lines.append(f"\n*{BOOK_STATUSES[status]} ({len(group)})*")
-                lines += [f"• {b.label()}" for b in group]
+                lines += [f"• {b.label()}" + (f" · {b.progress()}" if status == "reading" and b.progress() else "")
+                          for b in group]
         if read := by_status["read"]:
             lines.append(f"\n*{BOOK_STATUSES['read']} ({len(read)})*: " + ", ".join(b.title for b in read[:10])
                          + ("…" if len(read) > 10 else ""))
-        lines.append("\nDotknij książki, żeby zmienić status. Nowe: napisz tytuł albo wyślij screena.")
+        lines.append("\nDotknij książki, żeby zmienić status. Nowe: napisz tytuł albo wyślij screena. "
+                     "Postęp: napisz np. „przeczytałem 30 stron” albo „jestem na 120 stronie”.")
         active = by_status["reading"] + by_status["to_read"] + by_status["to_buy"]
         icon = {"reading": "📖", "to_read": "📚", "to_buy": "🛒"}
         return Reply("\n".join(lines), [(f"{icon[b.status]} {b.title[:40]}", f"bk:{b.id}") for b in active[:30]],
@@ -252,7 +328,7 @@ class Lists:
             buttons.append(("🗑 Usuń", f"bx:{b.id}"))
             return Reply(f"📚 *{b.label()}*\nTeraz: {BOOK_STATUSES[b.status]}", buttons, column=True)
         if action == "bs" and status in BOOK_STATUSES:
-            self.store.set_book_status(b.id, status)
+            self.store.set_book_status(b.id, status)  # „przeczytana” dolicza resztę stron
             extra = "\n🎉 Gratulacje! Kolejna przeczytana." if status == "read" else ""
             return Reply(f"📚 *{b.label()}* → {BOOK_STATUSES[status]}{extra}")
         if action == "bx":
@@ -298,4 +374,5 @@ BOOKS_HELP = """📚 Lista książek jest pusta. Dodaj je:
 • napisz `chcę przeczytać Atomowe nawyki` albo `mam już Sapiensa`,
 • `/ksiazka Diuna Frank Herbert`.
 
-Statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane."""
+Statusy: 🛒 do kupienia → 📚 do przeczytania → 📖 czytam → ✅ przeczytane.
+Postęp: „przeczytałem 30 stron Diuny”, „jestem na 120 stronie”, „Diuna ma 600 stron”."""

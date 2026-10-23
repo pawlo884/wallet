@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { api, type Book, type BookStatus } from "../api";
+import { api, type Book, type BookStatus, type ReadingStats } from "../api";
 import { DashboardTile } from "./DashboardTile";
 
 interface Props {
   books: Book[];
+  reading: ReadingStats | null;
   onChange: () => Promise<void>;
   onError: (msg: string) => void;
 }
@@ -42,7 +43,7 @@ const NEXT: Partial<Record<BookStatus, { status: BookStatus; label: string }>> =
     reading: { status: "read", label: "Przeczytana" },
   };
 
-export function BooksTile({ books, onChange, onError }: Props) {
+export function BooksTile({ books, reading, onChange, onError }: Props) {
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [status, setStatus] = useState<BookStatus>("to_buy");
@@ -75,6 +76,8 @@ export function BooksTile({ books, onChange, onError }: Props) {
       accent="violet"
       span="wide"
     >
+      {reading && <ReadingSummary stats={reading} />}
+
       <form onSubmit={add} className="mb-5 flex flex-col gap-2 sm:flex-row">
         <input
           value={title}
@@ -163,6 +166,7 @@ function BookCard({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium leading-snug">{book.title}</p>
         {book.author && <p className="text-xs text-slate-500">{book.author}</p>}
+        {book.status === "reading" && <Progress book={book} run={run} />}
         <div className="mt-2 flex flex-wrap items-center gap-1 text-xs">
           {next && (
             <button
@@ -229,6 +233,96 @@ function Cover({ book }: { book: Book }) {
       title={book.cover_url === null ? "Szukam okładki…" : "Brak okładki"}
     >
       {book.title.slice(0, 24)}
+    </div>
+  );
+}
+
+function ReadingSummary({ stats }: { stats: ReadingStats }) {
+  const max = Math.max(1, ...stats.days.map(([, n]) => n));
+  const items = [
+    ["Dziś", stats.today],
+    ["Ten tydzień", stats.week],
+    ["Ten miesiąc", stats.month],
+    ["Ten rok", stats.year],
+  ] as const;
+  return (
+    <div className="mb-5 flex flex-col gap-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3 sm:flex-row sm:items-end">
+      <dl className="grid flex-1 grid-cols-4 gap-2">
+        {items.map(([label, n]) => (
+          <div key={label}>
+            <dt className="text-[11px] text-slate-500">{label}</dt>
+            <dd className="text-lg font-semibold tabular-nums text-violet-200">
+              {n}
+              <span className="ml-1 text-xs font-normal text-slate-500">str.</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div
+        className="flex h-12 items-end gap-1 sm:w-56"
+        title="Przeczytane strony, ostatnie 14 dni"
+      >
+        {stats.days.map(([d, n]) => (
+          <div
+            key={d}
+            title={`${d.slice(8, 10)}.${d.slice(5, 7)}: ${n} str.`}
+            className={`flex-1 rounded-sm ${n > 0 ? "bg-violet-500/80" : "bg-slate-800"}`}
+            style={{ height: `${Math.max(8, (100 * n) / max)}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Progress({
+  book,
+  run,
+}: {
+  book: Book;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [page, setPage] = useState("");
+  const pct = book.pages ? Math.min(100, Math.round((100 * book.page) / book.pages)) : null;
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    const n = parseInt(page, 10);
+    if (Number.isNaN(n)) return;
+    run(() => api.setBookPage(book.id, n, null)).then(() => setPage(""));
+  };
+  return (
+    <div className="mt-2">
+      {pct !== null && (
+        <div className="h-1.5 overflow-hidden rounded bg-slate-800">
+          <div className="h-full rounded bg-violet-500" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <form onSubmit={save} className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+        <span className="whitespace-nowrap tabular-nums">
+          str. {book.page}
+          {book.pages ? ` / ${book.pages} · ${pct}%` : ""}
+        </span>
+        <input
+          value={page}
+          onChange={(e) => setPage(e.target.value)}
+          inputMode="numeric"
+          placeholder="strona"
+          aria-label="Strona, na której jesteś"
+          className="w-14 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 outline-none focus:border-violet-600"
+        />
+        {!book.pages && (
+          <button
+            type="button"
+            onClick={() => {
+              const n = parseInt(prompt("Ile stron ma książka?") || "", 10);
+              if (n > 0) run(() => api.setBookPage(book.id, null, n));
+            }}
+            className="text-slate-500 hover:text-slate-300"
+          >
+            ile stron?
+          </button>
+        )}
+      </form>
     </div>
   );
 }

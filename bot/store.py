@@ -36,8 +36,17 @@ CREATE TABLE IF NOT EXISTS books (
     key TEXT NOT NULL UNIQUE,      -- tytuł bez wielkości liter i ogonków (żeby nie dublować)
     created_at REAL NOT NULL,
     status_at REAL NOT NULL,
-    cover_url TEXT                 -- okładka do panelu: NULL = nie szukano, "" = nie znaleziono
+    cover_url TEXT,                -- okładka do panelu: NULL = nie szukano, "" = nie znaleziono
+    pages INTEGER,                 -- liczba stron (Google Books / Open Library / użytkownik); 0 = nie znaleziono
+    page INTEGER NOT NULL DEFAULT 0  -- strona, na której jestem
 );
+CREATE TABLE IF NOT EXISTS reading (  -- dziennik czytania: ile stron przybyło i kiedy
+    id INTEGER PRIMARY KEY,
+    at REAL NOT NULL,
+    book_id INTEGER NOT NULL,
+    pages INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reading_at ON reading(at);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
     at REAL NOT NULL,
@@ -58,7 +67,8 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 """
 
 # kolumny dodane po pierwszym wdrożeniu (CREATE TABLE IF NOT EXISTS nie zmienia istniejącej tabeli)
-MIGRATIONS = {"tasks": {"due_time": "TEXT", "gcal_id": "TEXT"}, "books": {"cover_url": "TEXT"}}
+MIGRATIONS = {"tasks": {"due_time": "TEXT", "gcal_id": "TEXT"}, "books": {"cover_url": "TEXT", "pages": "INTEGER",
+                                                                         "page": "INTEGER NOT NULL DEFAULT 0"}}
 
 EVENTS_KEEP_DAYS = 180
 
@@ -107,9 +117,19 @@ class Book:
     created_at: float
     status_at: float
     cover_url: str | None = None
+    pages: int | None = None
+    page: int = 0
 
     def label(self) -> str:
         return f"{self.title} — {self.author}" if self.author else self.title
+
+    def progress(self) -> str:
+        """„str. 120/600 · 20%” (albo samo „str. 120”, gdy nie znamy liczby stron)."""
+        if not self.page:
+            return f"{self.pages} str." if self.pages else ""
+        if not self.pages:
+            return f"str. {self.page}"
+        return f"str. {self.page}/{self.pages} · {min(100, round(100 * self.page / self.pages))}%"
 
 
 class Store:
@@ -203,7 +223,9 @@ class Store:
         return self.book(cur.lastrowid), True
 
     def books_without_cover(self, limit: int = 20) -> list[Book]:
-        rows = self.db.execute("SELECT * FROM books WHERE cover_url IS NULL ORDER BY id DESC LIMIT ?", (limit,))
+        # pages IS NULL: książki sprzed liczenia stron (0 = szukano i nie ma)
+        rows = self.db.execute("SELECT * FROM books WHERE cover_url IS NULL OR pages IS NULL ORDER BY id DESC LIMIT ?",
+                               (limit,))
         return [Book(**dict(r)) for r in rows]
 
     def book(self, bid: int) -> Book | None:
@@ -218,14 +240,52 @@ class Store:
         rows = self.db.execute("SELECT * FROM books ORDER BY status_at DESC, id DESC").fetchall()
         return [Book(**dict(r)) for r in rows]
 
-    def set_book_status(self, bid: int, status: str) -> None:
+    def set_book_status(self, bid: int, status: str) -> int | None:
+        """Przeczytana = do ostatniej strony (reszta stron liczy się do dziennika). Zwraca id wpisu albo None."""
         self.db.execute("UPDATE books SET status = ?, status_at = ? WHERE id = ?", (status, time.time(), bid))
+        b = self.book(bid)
+        if status == "read" and b and b.pages and b.page < b.pages:
+            return self.set_book_page(bid, b.pages)
+        return None
 
-    def set_book_cover(self, bid: int, url: str) -> None:
-        self.db.execute("UPDATE books SET cover_url = ? WHERE id = ?", (url, bid))
+    def set_book_cover(self, bid: int, url: str, pages: int | None = None) -> None:
+        """Wynik szukania: znaleziona okładka nie jest nadpisywana, liczba stron od użytkownika też."""
+        self.db.execute(
+            "UPDATE books SET cover_url = CASE WHEN COALESCE(cover_url, '') != '' THEN cover_url ELSE ? END,"
+            " pages = COALESCE(pages, ?) WHERE id = ?", (url, pages or 0, bid))
+
+    def set_book_pages(self, bid: int, pages: int | None) -> None:
+        self.db.execute("UPDATE books SET pages = ? WHERE id = ?", (pages, bid))
+
+    def set_book_page(self, bid: int, page: int) -> int | None:
+        """Ustawia bieżącą stronę; przyrost trafia do dziennika czytania. Zwraca id wpisu (do cofnięcia)."""
+        b = self.book(bid)
+        if not b:
+            return None
+        page = max(0, page)
+        self.db.execute("UPDATE books SET page = ? WHERE id = ?", (page, bid))
+        if page != b.page:  # cofnięcie strony (poprawka) odejmuje
+            return self.db.execute("INSERT INTO reading (at, book_id, pages) VALUES (?, ?, ?)",
+                                   (time.time(), bid, page - b.page)).lastrowid
+        return None
+
+    def delete_reading(self, rid: int) -> None:
+        self.db.execute("DELETE FROM reading WHERE id = ?", (rid,))
+
+    def pages_read(self, since: float, until: float | None = None) -> int:
+        row = self.db.execute("SELECT COALESCE(SUM(pages), 0) AS n FROM reading WHERE at >= ? AND at < ?",
+                              (since, until or time.time() + 1)).fetchone()
+        return row["n"]
+
+    def pages_by_day(self, since: float, tz) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for r in self.db.execute("SELECT at, pages FROM reading WHERE at >= ?", (since,)):
+            d = datetime.fromtimestamp(r["at"], tz).date().isoformat()
+            out[d] = out.get(d, 0) + r["pages"]
+        return out
 
     def delete_book(self, bid: int) -> None:
-        self.db.execute("DELETE FROM books WHERE id = ?", (bid,))
+        self.db.execute("DELETE FROM books WHERE id = ?", (bid,))  # dziennik czytania zostaje (statystyki)
 
     # ---------- dziennik zdarzeń ----------
 

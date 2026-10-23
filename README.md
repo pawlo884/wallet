@@ -45,7 +45,8 @@ domeny ani HTTPS** na VPS.
 | `/zadania` | zaległe, dziś, najbliższe i bez terminu; przyciski ☑️ zrobione / ⏭ jutro / 📅 za tydzień |
 | `/zadanie <opis>` | nowe zadanie wprost, np. `/zadanie do soboty wymienić opony` |
 | 📷 screen z książkami | książki na listę (okładka, strona sklepu, półka w Legimi/Empik/Kindle) |
-| `/ksiazki` | czytam, do przeczytania, do kupienia, przeczytane; zmiana statusu przyciskiem |
+| `/ksiazki` | czytam (z postępem), do przeczytania, do kupienia, przeczytane; strony dziś/tydzień/miesiąc/rok |
+| `przeczytałem 30 stron Diuny` | postęp czytania (też `jestem na 120 stronie`, `Diuna ma 600 stron`) |
 | `/ksiazka <tytuł>` | nowa książka wprost, np. `/ksiazka Diuna Frank Herbert` |
 | `/log` | dziennik: ostatnie wiadomości, przyciski, wywołania modelu i koszt w tym miesiącu |
 | `/odswiez` | ponowne pobranie kont i kategorii + przeładowanie `config/schedule.yaml` |
@@ -86,7 +87,11 @@ na 📚 *do przeczytania*.
   Nowa książka jest zawsze 🛒 *do kupienia*, chyba że dopiszesz inaczej (np. podpis pod screenem „mam”,
   „czytam”, „przeczytana”). Co widać na screenie (półka w Legimi, Kindle), statusu nie zmienia.
 - **Okładki** w panelu bot znajduje sam po tytule i autorze (Google Books, a gdy nie ma — Open Library),
-  w tle zaraz po dodaniu książki. Brak okładki = kafelek z tytułem.
+  w tle zaraz po dodaniu książki. Brak okładki = kafelek z tytułem. Przy okazji bierze liczbę stron.
+- **Postęp czytania**: napisz, ile stron przeczytałeś albo na której jesteś. Każdy przyrost trafia do
+  dziennika czytania (tabela `reading`), z którego bot liczy strony na dziś, tydzień, miesiąc i rok
+  (`/ksiazki`, panel, pytanie „ile stron przeczytałem w tym tygodniu?”). Ostatnia strona albo ✅ przeczytana
+  = książka przeczytana, z resztą stron doliczoną do statystyk.
   Każda widoczna książka osobno, z autorem. Ta sama książka drugi raz nie jest dublowana.
 
 ### Kalendarz Google

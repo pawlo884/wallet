@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import os
+import time
 
 os.environ.setdefault("WALLET_API_TOKEN", "x")
 os.environ.setdefault("ANTHROPIC_API_KEY", "x")
@@ -1024,6 +1025,12 @@ async def panel_test():
         assert (await c.patch(f"/api/v1/books/{bid}", json={"status": "zle"})).status == 400
         await c.patch(f"/api/v1/books/{bid}", json={"status": "reading"})
         assert core.store.book(bid).status == "reading"
+        assert (await c.patch(f"/api/v1/books/{bid}", json={"page": "x"})).status == 400
+        r = await c.patch(f"/api/v1/books/{bid}", json={"page": 120, "pages": 600})
+        assert (await r.json())["page"] == 120 and core.store.book(bid).pages == 600
+        reading = (await (await c.get("/api/v1/books")).json())["reading"]
+        assert reading["today"] == 120 and reading["days"][-1] == [core.today().isoformat(), 120], reading
+        assert len(reading["days"]) == 14
         assert (await c.delete(f"/api/v1/books/{bid}")).status == 200 and core.store.books() == []
 
         o = await (await c.get("/api/v1/overview")).json()
@@ -1257,14 +1264,14 @@ async def covers_test():
         if req.url.host == "www.googleapis.com":
             q = req.url.params["q"]
             if "Diuna" in q:
-                return httpx.Response(200, json={"items": [{"volumeInfo": {"imageLinks": {
+                return httpx.Response(200, json={"items": [{"volumeInfo": {"pageCount": 712, "imageLinks": {
                     "thumbnail": "http://books.google.com/books/content?id=x&zoom=1&edge=curl&source=gbs_api"}}}]})
             if "Limit" in q:
                 return httpx.Response(429)
             return httpx.Response(200, json={})
         if "Nieznana" in req.url.params["title"]:
             return httpx.Response(200, json={"docs": [{}]})
-        return httpx.Response(200, json={"docs": [{"cover_i": 12345}]})
+        return httpx.Response(200, json={"docs": [{"cover_i": 12345, "number_of_pages_median": 498}]})
 
     os.environ["BOOK_COVERS"] = "on"
     core = Core(Config())
@@ -1282,8 +1289,10 @@ async def covers_test():
     assert covers["Diuna"] == "https://books.google.com/books/content?id=x&zoom=1&source=gbs_api"
     assert covers["Sapiens"] == covers["Limit"] == "https://covers.openlibrary.org/b/id/12345-M.jpg"
     assert covers["Nieznana książka"] == "", "szukane, nie ma — nie pytamy ponownie"
+    pages = {b.title: b.pages for b in core.store.books()}
+    assert pages == {"Diuna": 712, "Sapiens": 498, "Limit": 498, "Nieznana książka": 0}, pages
     assert ("www.googleapis.com", {"q": "intitle:Sapiens inauthor:Yuval Noah Harari", "maxResults": "5",
-            "printType": "books", "fields": "items(volumeInfo(title,imageLinks))"}) in asked
+            "printType": "books", "fields": "items(volumeInfo(title,imageLinks,pageCount))"}) in asked
     n = len(asked)
     core.find_covers()
     await core.calendar_idle()
@@ -1293,3 +1302,108 @@ async def covers_test():
 
 
 asyncio.run(covers_test())
+
+
+async def reading_test():
+    """Postęp czytania: strona / przeczytane strony / liczba stron, statystyki, cofanie, „przeczytana”."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+    from bot.parser import BookAction
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+    core = Core(Config())
+    lists = core.lists
+    diuna, _ = core.store.add_book("Diuna", "Frank Herbert", "to_read")
+
+    def act(**kw):
+        return BookAction(action="progress", book_id=diuna.id, title="Diuna", author=None,
+                          status=kw.pop("status", "reading"), **kw)
+
+    lines, key = lists.apply([], [act(page=50, total_pages=600)])
+    b = core.store.book(diuna.id)
+    assert (b.page, b.pages, b.status) == (50, 600, "reading"), b
+    assert "str. 50/600 · 8%" in lines[0] and "(+50 str.)" in lines[0] and "Dziś: 50 str." in lines[0], lines
+    lines, key2 = lists.apply([], [act(pages_read=30)])
+    assert core.store.book(diuna.id).page == 80 and "(+30 str.)" in lines[0]
+    assert lists.reading_stats()["today"] == 80
+    assert lists.undo(key2) == "↩️ Cofnięte."
+    assert core.store.book(diuna.id).page == 50 and lists.reading_stats()["today"] == 50
+    # poprawka w dół odejmuje
+    lists.apply([], [act(page=40)])
+    assert lists.reading_stats()["week"] == 40
+    # stare czytanie (wczoraj, w zeszłym roku) nie liczy się do „dziś”
+    core.store.db.execute("INSERT INTO reading (at, book_id, pages) VALUES (?, ?, ?)",
+                          (time.time() - 86400 * 400, diuna.id, 100))
+    st = lists.reading_stats()
+    assert st["today"] == 40 and st["year"] == 40, st
+    # do końca → przeczytana z gratulacjami
+    lines, _ = lists.apply([], [act(page=700)])
+    b = core.store.book(diuna.id)
+    assert (b.page, b.status) == (600, "read") and "Gratulacje" in lines[0], (b, lines)
+    # przycisk „przeczytana” dolicza resztę stron
+    sapiens, _ = core.store.add_book("Sapiens", None, "reading")
+    core.store.set_book_pages(sapiens.id, 500)
+    core.store.set_book_page(sapiens.id, 100)
+    lists.handle_callback("bs", f"{sapiens.id}.read")
+    assert core.store.book(sapiens.id).page == 500 and lists.reading_stats()["today"] == 600 + 500
+    # nowa książka od razu z postępem
+    lines, _ = lists.apply([], [BookAction(action="add", book_id=None, title="Limit", author=None, status="reading",
+                                           page=20)])
+    assert "Dodana" in lines[0] and "str. 20" in lines[0], lines
+    # widok i blok dla modelu
+    core.store.add_book("Atomowe nawyki", None, "reading")
+    view = lists.books_view().text
+    assert "📈 Przeczytane strony: dziś 1120" in view and "• Limit · str. 20" in view, view
+    assert "CZYTANIE (przeczytane strony): dziś 1120" in lists.prompt_block()
+    await core.close()
+    print("\nOK czytanie")
+
+
+asyncio.run(reading_test())
+
+
+async def telegram_send_test():
+    """Długa odpowiedź (np. /ksiazki z setką pozycji) idzie w częściach; błąd wysyłki nie kończy się ciszą."""
+    import tempfile
+    from pathlib import Path
+    from bot import telegram_bot
+    from bot.telegram_bot import MAX_TEXT, _chunks, _send
+
+    os.environ.update(STATE_FILE=str(Path(tempfile.mkdtemp()) / "state.json"))
+    core = Core(Config())
+    for i in range(150):
+        core.store.add_book(f"Książka numer {i} o bardzo długim tytule_{i}", "Autor *Gwiazdka*", "to_buy")
+    reply = core.lists.books_view()
+    assert len(reply.text) > 4096, len(reply.text)
+    parts = _chunks(reply.text)
+    assert len(parts) > 1 and all(len(p) <= MAX_TEXT for p in parts)
+    assert "\n".join(parts).replace("\n", "") == reply.text.replace("\n", "")
+
+    class Bot:
+        def __init__(self, fail=0):
+            self.sent, self.fail = [], fail
+        async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
+            if len(text) > 4096:
+                raise Exception("Message is too long")
+            if self.fail:
+                self.fail -= 1
+                raise Exception("Bad Request")
+            self.sent.append((text, reply_markup))
+
+    bot = Bot()
+    await _send(bot, 1, reply)
+    assert len(bot.sent) == len(parts)
+    assert all(m is None for _, m in bot.sent[:-1]) and bot.sent[-1][1] is not None, "przyciski pod ostatnią"
+    bot = Bot(fail=2)  # Markdown i zwykły tekst odrzucone → informacja zamiast ciszy
+    try:
+        await _send(bot, 1, telegram_bot.Reply("x"))
+        raise AssertionError("powinien zgłosić błąd")
+    except Exception as e:
+        assert "Bad Request" in str(e)
+    assert bot.sent and bot.sent[0][0].startswith("⚠️ Nie udało się wysłać")
+    await core.close()
+    print("\nOK wysyłka Telegram")
+
+
+asyncio.run(telegram_send_test())

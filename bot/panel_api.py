@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from aiohttp import web
 
 from .lists import _valid_time, fmt_when
+from .parser import BookAction
 from .store import BOOK_STATUSES, day_start, month_start
 
 if TYPE_CHECKING:
@@ -156,7 +157,11 @@ def routes(core: "Core") -> list[web.RouteDef]:
     # ---------- książki ----------
 
     async def books_list(_: web.Request) -> web.Response:
-        return _json({"books": [asdict(b) for b in store.books()], "statuses": BOOK_STATUSES})
+        tz, today = core.cfg.tz, core.today()
+        by_day = store.pages_by_day(day_start(tz, 13), tz)
+        days = [(today - timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
+        return _json({"books": [asdict(b) for b in store.books()], "statuses": BOOK_STATUSES,
+                      "reading": {**core.lists.reading_stats(), "days": [[d, by_day.get(d, 0)] for d in days]}})
 
     async def book_create(request: web.Request) -> web.Response:
         data = await _body(request)
@@ -178,6 +183,17 @@ def routes(core: "Core") -> list[web.RouteDef]:
             if status not in BOOK_STATUSES:
                 return _err("Niepoprawny status")
             store.set_book_status(b.id, status)
+        if "page" in data or "pages" in data:
+            try:
+                page = None if data.get("page") is None else int(data["page"])
+                pages = None if data.get("pages") is None else int(data["pages"])
+            except (TypeError, ValueError):
+                return _err("Strona i liczba stron to liczby")
+            if (page is not None and page < 0) or (pages is not None and pages < 1):
+                return _err("Niepoprawna strona")
+            b = store.book(b.id)
+            core.lists.progress(b, BookAction(action="progress", book_id=b.id, title=b.title, author=None,
+                                               status="reading", page=page, total_pages=pages), [])
         logged("book_update", {"id": b.id, **data})
         return _json(asdict(store.book(b.id)))
 
