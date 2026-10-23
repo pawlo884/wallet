@@ -1226,6 +1226,26 @@ async def gcal_test():
     assert await core.calendar_pull() == [], "drugi raz nic nowego (te same dane)"
     assert g.state["pulled_at"]
 
+    # dodane w samym kalendarzu „Zadania” → nowe zadanie; powtarzające się i własne sieroty bota pominięte
+    fake.cals[cal]["g1"] = {"summary": "Odebrać paczkę", "start": {"dateTime": "2026-10-23T14:30:00Z"}}
+    fake.cals[cal]["g2"] = {"summary": "Siłownia", "recurringEventId": "r1", "start": {"date": "2026-10-23"}}
+    fake.cals[cal]["g3"] = {"summary": "Stare", "description": "Zadanie z bota (Telegram /zadania, panel /panel/).",
+                            "start": {"date": "2026-10-23"}}
+    pulled = await core.calendar_pull()
+    assert pulled == ["➕ Dodane w kalendarzu: Odebrać paczkę"], pulled
+    paczka = next(x for x in core.store.open_tasks() if x.gcal_id == "g1")
+    assert (paczka.title, paczka.due, paczka.due_time) == ("Odebrać paczkę", "2026-10-23", "16:30")
+    assert await core.calendar_pull() == [], "drugi raz nie dubluje"
+    # „✅” w nazwie w kalendarzu = zrobione; zdjęty = znowu otwarte
+    fake.cals[cal]["g1"]["summary"] = "✅ Odebrać paczkę"
+    assert await core.calendar_pull() == ["☑️ Zrobione w kalendarzu: Odebrać paczkę"]
+    assert core.store.task(paczka.id).status == "done"
+    fake.cals[cal]["g1"]["summary"] = "Odebrać paczkę"
+    assert await core.calendar_pull() == ["↩️ Znowu otwarte w kalendarzu: Odebrać paczkę"]
+    assert core.store.task(paczka.id).status == "open"
+    core.lists.delete_task(paczka.id)
+    await core.calendar_idle()
+
     # panel: wydarzenia na 7 dni, godzina przy dodawaniu i zmianie
     async with TestClient(TestServer(web.build_app(core))) as c:
         d = await (await c.get("/api/v1/tasks")).json()
