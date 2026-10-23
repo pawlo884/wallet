@@ -30,6 +30,7 @@ AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN = "https://oauth2.googleapis.com/token"
 REDIRECT = "http://localhost"
 SCOPE = "https://www.googleapis.com/auth/calendar"
+BOT_DESCRIPTION = "Zadanie z bota (Telegram /zadania, panel /panel/)."
 CALENDAR_NAME = "Zadania"
 TASK_MINUTES = 30  # zadanie z godziną zajmuje w kalendarzu pół godziny
 EVENTS_TTL = 300
@@ -154,7 +155,7 @@ class GoogleCalendar:
         done = t.status == "done"
         body = {
             "summary": f"✅ {t.title}" if done else t.title,
-            "description": "Zadanie z bota (Telegram /zadania, panel /panel/).",
+            "description": BOT_DESCRIPTION,
             "transparency": "transparent" if not t.due_time or done else "opaque",
             **when,
         }
@@ -194,7 +195,7 @@ class GoogleCalendar:
 
     async def task_changes(self) -> list[dict]:
         """Wydarzenia kalendarza „Zadania” zmienione od ostatniego sprawdzenia (pierwszy raz: wszystkie,
-        razem z usuniętymi): [{id, deleted, title, due, due_time}]."""
+        razem z usuniętymi): [{id, deleted, title, due, due_time, done, recurring, from_bot}]."""
         st = self.state
         cal = st.get("calendar_id")
         if not cal:
@@ -278,9 +279,11 @@ def _task_change(e: dict, tz) -> dict:
         due, due_time = local[:10], local[11:16]
     else:
         due, due_time = s.get("date"), None
-    title = (e.get("summary") or "").removeprefix("✅ ").strip()
-    return {"id": e["id"], "deleted": e.get("status") == "cancelled", "title": title, "due": due,
-            "due_time": due_time}
+    summary = (e.get("summary") or "").strip()
+    return {"id": e["id"], "deleted": e.get("status") == "cancelled", "title": summary.removeprefix("✅").strip(),
+            "due": due, "due_time": due_time, "done": summary.startswith("✅"),
+            "recurring": bool(e.get("recurringEventId") or e.get("recurrence")),
+            "from_bot": (e.get("description") or "").startswith(BOT_DESCRIPTION)}
 
 
 def conflicts(events: list[dict], day: date, hhmm: str, minutes: int = TASK_MINUTES) -> list[dict]:

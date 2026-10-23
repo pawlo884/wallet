@@ -1087,8 +1087,9 @@ class Core:
                 self.store.log_event("error", agent="kalendarz", name="gcal_delete", output=str(e)[:300])
 
     async def calendar_pull(self) -> list[str]:
-        """Zmiany zrobione w samym Kalendarzu Google wracają do listy: usunięte wydarzenie = usunięte
-        zadanie, przeniesione = nowy termin, inna nazwa = nowy tytuł. Zwraca opis zmian."""
+        """Zmiany zrobione w samym Kalendarzu Google wracają do listy: nowe wydarzenie w kalendarzu
+        „Zadania” = nowe zadanie, usunięte = usunięte zadanie, przeniesione = nowy termin, inna nazwa =
+        nowy tytuł, „✅” na początku nazwy = zrobione (bez niego = znowu otwarte). Zwraca opis zmian."""
         if not self.gcal.connected:
             return []
         lines = []
@@ -1102,11 +1103,26 @@ class Core:
             for c in changes:
                 t = by_event.get(c["id"])
                 if not t:
+                    # Dodane w samym kalendarzu. Pomijamy powtarzające się (setki zadań) i własne wydarzenia
+                    # bota bez zadania (zadanie usunięte, a wydarzenia nie udało się skasować).
+                    if c["deleted"] or c["recurring"] or c["from_bot"] or not c["title"] or not c["due"]:
+                        continue
+                    t = self.store.add_task(c["title"], c["due"], c["due_time"])
+                    self.store.set_task(t.id, gcal_id=c["id"])
+                    if c["done"]:
+                        self.store.finish_task(t.id)
+                    lines.append(f"➕ Dodane w kalendarzu: {t.title}")
                     continue
                 if c["deleted"]:
                     self.store.delete_task(t.id)
                     lines.append(f"🗑 Usunięte w kalendarzu: {t.title}")
                     continue
+                if c["done"] and t.status == "open":
+                    self.store.finish_task(t.id)
+                    lines.append(f"☑️ Zrobione w kalendarzu: {t.title}")
+                elif not c["done"] and t.status == "done":
+                    self.store.set_task(t.id, status="open", done_at=None)
+                    lines.append(f"↩️ Znowu otwarte w kalendarzu: {t.title}")
                 fields = {}
                 if c["title"] and c["title"] != t.title:
                     fields["title"] = c["title"][:200]
